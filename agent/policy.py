@@ -8,11 +8,10 @@ from utilities import *
 from .demo_handler import DemoHandler
 from .my_local_graph import build_local_heterodata_batch
 from .rho import Rho 
-from .alignment import EuclidToHypAlign
-from utilities import next_proceeding_strict, geodesic_segment, time_posterior
-from .dynamic import HyperbolicDynamics
-from .prod_cross_attn import ProductCrossAttention
-from .action_head import ProductManifoldGPHead
+from .foresight import PsiForesight
+from .pma import ProductManifoldAttention
+from .action_head import ProductManifoldGPHead, SimpleActionHead
+
 
 class Policy(nn.Module):
 
@@ -29,8 +28,12 @@ class Policy(nn.Module):
         self.pred_horizon = pred_horizon
         self.tau = tau
         self.curvature = curvature
-        self.emb_dim_euc = num_att_heads * euc_head_dim
+        self.euc_dim = num_att_heads * euc_head_dim
+        self.hyp_dim = 2
+        self.z_dim = self.hyp_dim + self.euc_dim
         self.angular_granulities = angular_granulities
+        
+
         self.geometric_encoder = geometric_encoder 
         self.rho = Rho(
             in_dim_agent = in_dim_agent, # default by construction, 4 onehot + 5 scalars (sin,cos,state,time,done)
@@ -43,50 +46,50 @@ class Policy(nn.Module):
             dropout      = 0.1,
             use_agent_agent = False
         )
-
         self.demo_handler = DemoHandler(
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
-
-        self.context_alignment = EuclidToHypAlign(
-            d_e = num_att_heads * euc_head_dim,
-            d_h = 2,
-            heads = num_att_heads
+        self.context_alignment = ProductManifoldAttention(
+            de = self.euc_dim,
+            dh = self.hyp_dim,
+            z_dim = self.z_dim,
+            curvature= self.curvature,
+            tau = self.tau,
+            dropout = 0.1,
+            proj_hidden = 0.1, 
         )
-        
-        self.dynamic = HyperbolicDynamics(
-            d_h = 2,
-            hidden = 256,
-            c = self.curvature
+        self.context_graph_transformer = (
         )
-
-        self.pca = ProductCrossAttention(
-            num_heads=num_att_heads,
-            euc_head_dim= euc_head_dim,
-            hyp_dim = 2,
-            z_dim = num_att_heads * euc_head_dim,
-            curvature=curvature,
-            tau =tau,
-        )
-
         self.trajectory_predictor = ProductManifoldGPHead(
             action_dim=4,
-            z_dim = num_att_heads * euc_head_dim,
+            z_dim = self.hyp_dim + self.euc_dim,
             M = 128,
         )
-        
+        self.foresight_adjustment = PsiForesight(
+            z_dim=self.z_dim,
+            edge_dim=self.z_dim,
+            n_heads = num_att_heads,
+            dropout=0.1
+        )
+        self.action_head = SimpleActionHead(
+            in_dim=self.z_dim,
+            hidden_dim=self.z_dim // 2
+        )
+
+        self.curr_hyp_emb = nn.Parameter(torch.randn(self.z_dim))
+              
     def forward(self,
                 curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
                 curr_object_pos, # [B x M x 2] x,y
                 demo_agent_info, # [B x N x L x self.num_agent_nodes x 6] x, y, theta, state, time, done
                 demo_object_pos, # [B x N x L x M x 2]
+                actions # [B, T, 4]
                 ):
-
-        # First process demos into hyperbolic embeddings
         B, N, L, num_agent_nodes, agent_dim = demo_agent_info.shape
         _, _, _, num_object_nodes, obj_pos_dim = demo_object_pos.shape 
 
+        ############################ First process demos into hyperbolic embeddings ############################
         demo_hyp_all = self.demo_handler(demo_agent_info)
         B_, N_, L_, dh = demo_hyp_all.shape
         assert (B_, N_, L_,) == (B, N, L), "SK shape mismatch."
@@ -111,19 +114,18 @@ class Policy(nn.Module):
             agent_pos_b = flat_demo_agent_info,
             scene_pos_b=flat_demo_scene_pos_batch,
             scene_feats_b=flat_demo_scene_feats_batch,
-            num_freqs=self.emb_dim_euc // 4,
+            num_freqs=self.euc_dim // 4,
             include_agent_agent=False # no agent-agent edges 
         ) # returns HeteroBatch[B*N*L]
 
         ### get rho(G) for demos 
         demo_node_emb, _ = self.rho(flat_demo_local_graphs)
         ##### indv emb
-        flat_demo_rho_batch = demo_node_emb['agent']                  # [B*N*L, A, euc_emb]
+        flat_demo_rho_batch = demo_node_emb['agent']                  # [B*N*L, A, euc_emb]        
         demo_rho_batch = flat_demo_rho_batch.view(B, N, L, num_agent_nodes, -1)    # [B,N,L,A,euc_emb]
 
 
-        # Now for current observation and action
-
+        ############################ Now for current observation ###################################
         ### first get obj embeddings 
         F_list, C_list = [], []
         for i in range(B):
@@ -137,7 +139,7 @@ class Policy(nn.Module):
             agent_pos_b = curr_agent_info,      # [B, A, 6]
             scene_pos_b = curr_scene_pos,       # [B, M, 2]
             scene_feats_b = curr_scene_feats,   # [B, M, D]
-            num_freqs = self.emb_dim_euc //4,
+            num_freqs = self.euc_dim //4,
             include_agent_agent=False
         )
 
@@ -145,55 +147,131 @@ class Policy(nn.Module):
         curr_node_emb, _ = self.rho(curr_local_graph_batch)
         ##### indv emb 
         curr_rho_batch = curr_node_emb['agent']     # [B, A, De]
+
+        ### impromptu shape fixes 
         if len(curr_rho_batch.shape) == 2:
             temp = curr_rho_batch.shape
             curr_rho_batch = curr_rho_batch.view(1,*temp)
-        ### then do context alignment by searching for curr_hyp_embedding within SK tree with Euc embeddings 
-        ### euclidean keys/values from demos:
-        curr_hyp_est, attn = self.context_alignment(
-            curr_rho_batch, 
+
+        ### then get curr hyp emb
+        curr_hyp_emb = self.curr_hyp_emb.repeat(B,1,1) # [B,1,dh]
+
+        ############################ Then Context Align demos & curr obs (phi) ############################ 
+        curr_latent_var = self.context_alignment(
+            curr_rho_batch,
+            curr_hyp_emb,
             demo_rho_batch,
             demo_hyp_all
-        ) # [B, hyp_dim], [B, num_agent_nodes, num_demos, demo_length]
-
-
-        # Decode actions from curr emb to next emb
-        ### If using learnt dynamics
+        ) # [B, A, z_dim]
+       
+        # change from here... 
+        ############################ Then Actions ############################ 
+        pred_obj_info, pred_agent_info = self._perform_reverse_action(
+                                                                        actions, 
+                                                                        curr_object_pos, 
+                                                                        curr_agent_info)
         
-        h_seq = [curr_hyp_est]
-        for t in range(self.pred_horizon):
-            h_seq.append(self.dynamic(h_seq[-1]))
-        path_hyp = torch.stack(h_seq, dim = 1)
 
-        # Product Cross Attn to create latent variables
-        # 1) path_hyp is of shape (B, self.pred_horizon + 1, 2)
-        # 2) curr_rho(.) is of shape(B, A, euc_dim = self.num_attn_head * self.euc_head_dim)
-        # 3) ProCrosAttn (PCA) takes in these are combine them to form meaningful representation like in paper 
-        # 4) output should be (B, self.pred_horizon + 1,  z_dim (parameter)
-        z_seq, attn_seq = self.pca(
-            hyp_seq = path_hyp,
-            rho_ctx = curr_rho_batch
+        # with pred info flatten, then make hetero graph 
+        B,T,M, _ = pred_obj_info.shape  # T = self.pred_horizon
+        flat_pred_obs_info = pred_obj_info.view(B*T, M, -1)
+        flat_pred_agent_info = pred_agent_info.view(B*T, num_agent_nodes, -1)
+        flat_pred_local_graphs = build_local_heterodata_batch(
+            flat_pred_agent_info,
+            flat_pred_obs_info,
+            num_freqs=self.euc_dim // 4,
+            include_agent_agent=False 
         )
-        z_t      = z_seq[:, :-1, :]        # [B, T, Z]
-        h_tp1    = path_hyp[:, 1:, :]      # [B, T, 2]
-        v_tp1    = logmap0(h_tp1, self.curvature)  # [B, T, 2]  (optional, keeps things Euclidean)
 
-        # x_t = torch.cat([z_t, v_tp1], dim=-1)      # [B, T, Z+2]
-        actions = self.trajectory_predictor(h_tp1, z_t)   # define this -> [B, T, action_dim]
+        ### get pred rho and hyp emb
+        pred_node_emb, _ = self.rho(flat_pred_local_graphs)
+        flat_pred_rho_batch = pred_node_emb['agent'] # [B*T, num_agent_nodes, self.euc_dim]
+        pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
+        pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,-1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
+        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
 
-        # v_tan = logmap0(path_hyp, self.curvature) # [B, T + 1, hyp_dim]
-        # vel = v_tan[:, 1:, :] - v_tan[:, :-1,:] # [B, self.pred_horizon, hyp_dim]
-        # actions = self.low_level_action_head(vel) # [B, self.pred_horizon, 3]
+        flat_pred_latent_variables = self.context_alignment(
+            flat_pred_rho_batch,
+            flat_pred_hyp_emb,
+            demo_rho_batch,
+            demo_hyp_all,
+        ) # [B*T, A, z_dim]
 
-        # return actions
-        return {
-            'curr_rho' : curr_rho_batch,
-            'demo_rho' : demo_rho_batch,
-            'curr_hyp' : curr_hyp_est,
-            'demo_hyp' : demo_hyp_all,
-            'attn_e2e' : attn,
-            'pred_actions' : actions
-        }
+        pred_latent_variables = flat_pred_latent_variables.view(B,T,num_agent_nodes,-1) # [B,T, A, z_dim]
+        ############################ info Z_current => Z_predicted  ############################ 
+        # like in IP 
+        # Z_current <= curr_latent_var [B,A,z]
+        # Z_predicted <= pred_latent_variables [B,T, A, z_dim] * T = self.pred_horizon
+        
+        final_embd = self.foresight_adjustment(
+            curr_latent_var,
+            pred_latent_variables
+        ) # [B, T, A, z_dim] propagate info from curr lv to pred lv like in IP 
 
-    def predict(self):
-        pass 
+
+        denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
+
+        return denoising_direction
+
+    def _perform_reverse_action(self,
+                                actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
+                                curr_object_pos: torch.Tensor, # [B, M, 2]
+                                curr_agent_info: torch.Tensor  # [B, A, 6]: [ax, ay, cos, sin, grip, state_gate?]
+                                ):
+        """
+        Apply inverse SE(2) to OBJECTS ONLY to simulate agent motion.
+        Agents do not move here. Their info only changes in the gripper/state
+        channel when state_action != current grip (per time step, per agent).
+        """
+        import torch
+        B, T, _ = actions.shape
+        _, M, _ = curr_object_pos.shape
+        _, A, C = curr_agent_info.shape
+        device  = curr_object_pos.device
+        dtype   = curr_object_pos.dtype
+
+        # ---- split action channels ----
+        dxdy   = actions[..., 0:2]            # [B,T,2]
+        dtheta = actions[..., 2]              # [B,T]
+        sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
+
+        # ---- OBJECTS: inverse SE(2) applied unconditionally ----
+        # p_prev = R(-dθ) @ (p_curr - [dx,dy])
+        dxdy_bt12 = dxdy.view(B, T, 1, 2)           # [B,T,1,2]
+        obj_b1m2  = curr_object_pos.view(B, 1, M, 2)
+        delta     = obj_b1m2 - dxdy_bt12            # [B,T,M,2]
+
+        c = torch.cos(-dtheta).view(B, T, 1, 1)     # [B,T,1,1]
+        s = torch.sin(-dtheta).view(B, T, 1, 1)
+
+        x = delta[..., 0:1]
+        y = delta[..., 1:2]
+        x_rot =  c * x + s * y
+        y_rot = -s * x + c * y
+        pred_object_pos = torch.cat([x_rot, y_rot], dim=-1)  # [B,T,M,2]
+
+        # ---- AGENTS: positions/orientations stay fixed; only grip may toggle ----
+        # Broadcast static agent info across time
+        ax   = curr_agent_info[..., 0].unsqueeze(1).expand(B, T, A)  # [B,T,A]
+        ay   = curr_agent_info[..., 1].unsqueeze(1).expand(B, T, A)
+        cth  = curr_agent_info[..., 2].unsqueeze(1).expand(B, T, A)
+        sth  = curr_agent_info[..., 3].unsqueeze(1).expand(B, T, A)
+        grip = curr_agent_info[..., 4].unsqueeze(1).expand(B, T, A)
+
+        # Optional pass-through gate channel
+        if C >= 6:
+            gate = curr_agent_info[..., 5].unsqueeze(1).expand(B, T, A)
+        else:
+            gate = torch.ones(B, T, A, device=device, dtype=dtype)
+
+        # Compare desired state to current grip; update ONLY when they differ
+        sa_bta = sa.unsqueeze(-1).expand(B, T, A)   # [B,T,A]
+        change_mask = (sa_bta.round() != grip.round())  # bool
+
+        grip_out = torch.where(change_mask, sa_bta, grip)  # set to command when different, else keep
+
+        # Repack without moving agents
+        pred_agent_info = torch.stack([ax, ay, cth, sth, grip_out, gate], dim=-1)  # [B,T,A,6]
+
+        return pred_object_pos, pred_agent_info
+
