@@ -1,3 +1,4 @@
+from audioop import bias
 import torch
 import numpy as np
 import random
@@ -20,7 +21,7 @@ class PseudoDemoGenerator:
     agent_keypoints = PseudoGame.agent_keypoints
 
     def __init__(self, device, num_demos=5, min_num_waypoints=2, max_num_waypoints=6, 
-                 num_threads=2, demo_length = 10, pred_horizon = 5):
+                 num_threads=2, demo_length = 10, pred_horizon = 5, biased_odds = 0.5, augmented_odds = 0.1):
         self.num_demos = num_demos
         self.pred_horizon = pred_horizon
         self.min_num_waypoints = min_num_waypoints
@@ -32,13 +33,13 @@ class PseudoDemoGenerator:
         self.player_speed = 5 
         self.player_rot_speed = 5
         self.num_threads = num_threads
-        self.biased_odds = 0.1
-        self.augmented = True
+        self.biased_odds = biased_odds
+        self.augmented_odds = augmented_odds
         
         # Thread-local storage for agent keypoints
         self._thread_local = threading.local()
 
-    def get_batch_samples(self, batch_size: int) -> Tuple[torch.Tensor, List, torch.Tensor]:
+    def get_batch_samples(self, batch_size: int, biased = None, augmented = None) -> Tuple[torch.Tensor, List, torch.Tensor]:
         """
         Generate a batch of samples in parallel
         Returns:
@@ -50,7 +51,7 @@ class PseudoDemoGenerator:
         with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
             # Submit all sample generation tasks
 
-            futures = [executor.submit(self._generate_single_sample) for _ in range(batch_size)]
+            futures = [executor.submit(self._generate_single_sample, biased, augmented) for _ in range(batch_size)]
             
             # Collect results as they complete
             curr_obs_batch = []
@@ -71,10 +72,12 @@ class PseudoDemoGenerator:
         
         return curr_obs_batch, context_batch, clean_actions_batch
 
-    def _generate_single_sample(self) -> Tuple[dict, List, torch.Tensor]:
+    def _generate_single_sample(self, biased, augmented) -> Tuple[dict, List, torch.Tensor]:
         """Generate a single training sample (thread-safe)"""
-        biased = np.random.rand() < self.biased_odds
-        augmented = self.augmented # for now 
+        if biased is None:
+            biased = random.random() < self.biased_odds
+        if augmented is None:
+            augmented = random.random() < self.augmented_odds
         pseudo_game = self._make_game(biased, augmented)
         context = self._get_context(pseudo_game)   
         curr_obs, clean_actions = self._get_ground_truth(pseudo_game)
@@ -137,7 +140,7 @@ class PseudoDemoGenerator:
         return context
             
     def _get_ground_truth(self, pseudo_game):
-        pseudo_game.set_augmented(np.random.rand() > 0.5) 
+        pseudo_game.set_augmented(False) # actual test path never augmented, bias remains 
         pseudo_demo = self._run_game(pseudo_game)
         pd_actions = pseudo_demo.get_actions(mode='se2')
         se2_actions = np.array([action[0].flatten() for action in pd_actions]).reshape(-1, 9) # n x 9
