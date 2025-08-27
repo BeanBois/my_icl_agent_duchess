@@ -30,7 +30,7 @@ class Policy(nn.Module):
         self.curvature = curvature
         self.euc_dim = num_att_heads * euc_head_dim
         self.hyp_dim = 2
-        self.z_dim = self.hyp_dim + self.euc_dim
+        self.z_dim = 2 * self.hyp_dim + self.euc_dim
         self.angular_granulities = angular_granulities
         
 
@@ -57,27 +57,22 @@ class Policy(nn.Module):
             curvature= self.curvature,
             tau = self.tau,
             dropout = 0.1,
-            proj_hidden = 0.1, 
+            proj_hidden = 0, 
         )
-        self.context_graph_transformer = (
-        )
-        self.trajectory_predictor = ProductManifoldGPHead(
-            action_dim=4,
-            z_dim = self.hyp_dim + self.euc_dim,
-            M = 128,
-        )
+        
         self.foresight_adjustment = PsiForesight(
             z_dim=self.z_dim,
             edge_dim=self.z_dim,
             n_heads = num_att_heads,
             dropout=0.1
         )
+
         self.action_head = SimpleActionHead(
             in_dim=self.z_dim,
             hidden_dim=self.z_dim // 2
         )
 
-        self.curr_hyp_emb = nn.Parameter(torch.randn(self.z_dim))
+        self.curr_hyp_emb = nn.Parameter(torch.randn(self.hyp_dim))
               
     def forward(self,
                 curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
@@ -154,8 +149,7 @@ class Policy(nn.Module):
             curr_rho_batch = curr_rho_batch.view(1,*temp)
 
         ### then get curr hyp emb
-        curr_hyp_emb = self.curr_hyp_emb.repeat(B,1,1) # [B,1,dh]
-
+        curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
         ############################ Then Context Align demos & curr obs (phi) ############################ 
         curr_latent_var = self.context_alignment(
             curr_rho_batch,
@@ -166,19 +160,28 @@ class Policy(nn.Module):
        
         # change from here... 
         ############################ Then Actions ############################ 
-        pred_obj_info, pred_agent_info = self._perform_reverse_action(
-                                                                        actions, 
-                                                                        curr_object_pos, 
-                                                                        curr_agent_info)
+        pred_obj_info, pred_agent_info = self._perform_reverse_action(actions, curr_object_pos, curr_agent_info)
         
 
         # with pred info flatten, then make hetero graph 
         B,T,M, _ = pred_obj_info.shape  # T = self.pred_horizon
         flat_pred_obs_info = pred_obj_info.view(B*T, M, -1)
         flat_pred_agent_info = pred_agent_info.view(B*T, num_agent_nodes, -1)
+        F_list, C_list = [], []
+        for i in range(B*T):
+            # one cloud Pi: [M_raw, 2]  (use your raw per-frame points here)
+            Pi = flat_pred_obs_info[i]           # [M_raw, 2]
+            Fi, Ci = self.geometric_encoder(Pi)    # Fi: [M, D], Ci: [M, 2]
+            F_list.append(Fi)
+            C_list.append(Ci)
+        flat_pred_feats_batch = torch.stack(F_list, dim=0)  # [B*N*L, M, D]
+        flat_pred_scene_pos_batch   = torch.stack(C_list, dim=0)  # [B*N*L, M, 2]
+
+
         flat_pred_local_graphs = build_local_heterodata_batch(
-            flat_pred_agent_info,
-            flat_pred_obs_info,
+            agent_pos_b = flat_pred_agent_info,
+            scene_pos_b = flat_pred_scene_pos_batch,
+            scene_feats_b = flat_pred_feats_batch,
             num_freqs=self.euc_dim // 4,
             include_agent_agent=False 
         )
@@ -187,12 +190,15 @@ class Policy(nn.Module):
         pred_node_emb, _ = self.rho(flat_pred_local_graphs)
         flat_pred_rho_batch = pred_node_emb['agent'] # [B*T, num_agent_nodes, self.euc_dim]
         pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
-        pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,-1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
-        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
+        pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
+        
+        # then context allign 
+        _pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1)
+        _flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
 
         flat_pred_latent_variables = self.context_alignment(
-            flat_pred_rho_batch,
-            flat_pred_hyp_emb,
+            _pred_rho_batch, # [B*T, A, de ]
+            _flat_pred_hyp_emb, # [B*T, dh]
             demo_rho_batch,
             demo_hyp_all,
         ) # [B*T, A, z_dim]
@@ -204,10 +210,10 @@ class Policy(nn.Module):
         # Z_predicted <= pred_latent_variables [B,T, A, z_dim] * T = self.pred_horizon
         
         final_embd = self.foresight_adjustment(
-            curr_latent_var,
-            pred_latent_variables
+            curr_latent_var, 
+            pred_latent_variables,
+            actions,
         ) # [B, T, A, z_dim] propagate info from curr lv to pred lv like in IP 
-
 
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
 

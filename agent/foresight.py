@@ -8,7 +8,7 @@ class FourierEdgeEmbed(nn.Module):
     def __init__(self, num_freqs: int = 6, out_dim: int = 64):
         super().__init__()
         self.num_freqs = num_freqs
-        self.proj = nn.Linear(4 * (2 * num_freqs) + 2, out_dim)  # dx,dy,theta -> 2*num_freqs each + sin/cos(theta)
+        self.proj = nn.Linear(3 * (2 * num_freqs) + 2 , out_dim)  # dx,dy,theta -> 2*num_freqs each + sin/cos(theta)
 
     def forward(self, dxyth: torch.Tensor):  # [B, T, A, 3 or 4]; last can include state_action
         # Use dx,dy,theta (ignore state_action for the edge encoding)
@@ -73,7 +73,7 @@ class PsiForesight(nn.Module):
     def _merge_heads(self, x):  # [B,*,A,h,hd] -> [B,*,A,z]
         B = x.shape[0]
         *rest, A, h, hd = x.shape[1:]
-        return x.view(B, *rest, A, h * hd)
+        return x.reshape(B, *rest,A,h*hd)
 
     @torch.no_grad()
     def _safe_softmax(self, logits, dim):
@@ -97,12 +97,12 @@ class PsiForesight(nn.Module):
         k = self.k_proj(zc)                  # [B,T,A,z]
         v = self.v_proj(zc)                  # [B,T,A,z]
 
-        # Edge encoding from (dx,dy,theta)
-        e = self.edge_enc(actions[..., :3]).unsqueeze(2).expand(B, T, A, A, -1)  # broadcast per (i <- j); simple A-to-A same edge
-        # We only have a single relative per-time-step transform from "current->action".
-        # For per-agent edges, we share the same edge code across j (keeps compute light).
-        # Fold edge into K (Eq.3 style). :contentReference[oaicite:3]{index=3}
-        e_k = self.e_proj(actions[..., :3].new_zeros(B, T, A, self.z))  # placeholder
+        # Edge encoding from (dx,dy,theta) # fix from here?
+        # e = self.edge_enc(actions[..., :3]).unsqueeze(2).expand(B, T, A, A, -1)  # broadcast per (i <- j); simple A-to-A same edge
+        # # We only have a single relative per-time-step transform from "current->action".
+        # # For per-agent edges, we share the same edge code across j (keeps compute light).
+        # # Fold edge into K (Eq.3 style). :contentReference[oaicite:3]{index=3}
+        # e_k = self.e_proj(actions[..., :3].new_zeros(B, T, A, self.z))  # placeholder
         # Simpler: add the same edge bias to every K_j at that t
         e_bias = self.e_proj(self.edge_enc(actions[..., :3]))  # [B,T,edge_z]
         e_bias = e_bias.unsqueeze(2).expand(B, T, A, self.z)   # [B,T,A,z]
@@ -127,7 +127,7 @@ class PsiForesight(nn.Module):
         out_h = torch.einsum('btahij,btajh->btaih',
                              attn,
                              vh.reshape(B,T,A,self.h,self.hd))
-
+        
         out = self._merge_heads(out_h)  # [B,T,A,z]
         out = self.out(out)
         out = self.drop(out)
@@ -140,7 +140,6 @@ class PsiForesight(nn.Module):
             # Use state_action (0..1) as an extra multiplicative gate per (t).
             sa = actions[..., 3:4].clamp(0, 1).unsqueeze(2).expand(B, T, A, 1)
             g = g * sa
-
         # Residual + FFN
         z_mid = z_pred + g * out
         z_mid = self.ln_o(z_mid)

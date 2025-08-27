@@ -33,10 +33,10 @@ class SimpleActionHead(torch.nn.Module):
     def forward(self, 
                 embeddings # [B, T, self.in_dim]
                 ):
-        p = self.pred_head_g(embeddings)
+        p = self.pred_head_p(embeddings)
         r = self.pred_head_rot(embeddings)
         g = self.pred_head_g(embeddings)
-        return torch.concant([p,r,g], dim =-1)
+        return torch.concat([p,r,g], dim =-1)
 
 
 def mobius_sqnorm(x):                  # ||x||^2

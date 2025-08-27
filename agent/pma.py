@@ -120,7 +120,6 @@ class ProductManifoldAttention(nn.Module):
         # Split z into two halves (E and H); if odd, Euclidean gets the extra unit.
         z_e = z_dim // 2 + (z_dim % 2)
         z_h = z_dim // 2
-
         def make_head(in_dim, out_dim):
             if proj_hidden and proj_hidden > 0:
                 return nn.Sequential(

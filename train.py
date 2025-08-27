@@ -478,8 +478,8 @@ class TrainConfig:
     demo_length = 20
     max_translation = 1000
     max_diffusion_steps = 1000
-    beta_start = 1e-4,
-    beta_end = 0.02,
+    beta_start = 1e-4
+    beta_end = 0.02
 
     # flags
     train_geo_encoder = False
@@ -562,6 +562,7 @@ if __name__ == "__main__":
                     curr_object_pos,
                     demo_agent_info,
                     demo_object_pos,
+                    clean_actions
                 )
 
 

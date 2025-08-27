@@ -20,7 +20,8 @@ class Agent(nn.Module):
                 tau: float = 0.5):
 
         super().__init__()
-        self.policy = Policy(geometric_encoder,
+        self.policy = Policy(
+            geometric_encoder,
                 num_att_heads,
                 euc_head_dim,
                 pred_horizon,
@@ -41,9 +42,13 @@ class Agent(nn.Module):
                 curr_object_pos, # [B x M x 2] x,y
                 demo_agent_info, # [B x N x L x self.num_agent_nodes x 6] x, y, theta, state, time, done
                 demo_object_pos, # [B x N x L x M x 2]
-                actions): # [B, T, 4]
-
-        noisy_actions = self._add_action_noise(actions) # [B, T, 4]
+                actions,         # [B, T, 4]
+                ): 
+        
+        B, _, _ = actions.shape 
+        device = actions.device 
+        timesteps = torch.randint(0,self.max_diff_timesteps, (B,), device = device)
+        noisy_actions, _, _ = self.add_action_noise(actions, timesteps) # [B, T, 4]
 
         denoising_directions_normalised = self.policy(
             curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
@@ -51,8 +56,7 @@ class Agent(nn.Module):
             demo_agent_info, # [B x N x L x self.num_agent_nodes x 6] x, y, theta, state, time, done
             demo_object_pos, # [B x N x L x M x 2]
             noisy_actions # [B, T, 4]
-        ) # [B, T, 5]
-
+        ) # [B, T, 4, 5]
         denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
 
         return denoising_directions, noisy_actions
@@ -175,5 +179,6 @@ class Agent(nn.Module):
         return self.betas[timesteps]
 
     def _unnormalise_denoising_directions(self, denoising_directions_normalised):
-        return denoising_directions_normalised / self.max_translation 
-
+        
+        denoising_directions_normalised = denoising_directions_normalised[:4] * self.max_translation 
+        return denoising_directions_normalised 
