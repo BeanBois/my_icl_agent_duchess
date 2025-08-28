@@ -1,5 +1,6 @@
 import torch 
 import torch.nn as nn
+import torch.nn.functional as F
 
 from configs import ANGULAR_GRANULITIES
 from .policy import Policy
@@ -60,6 +61,93 @@ class Agent(nn.Module):
         denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
 
         return denoising_directions, noisy_actions
+
+    @torch.no_grad()
+    def plan_actions(self,
+                    curr_agent_info,   # [B,A_nodes,6]
+                    curr_object_pos,   # [B,M,2]
+                    demo_agent_info,   # [B,N,L,A_nodes,6]
+                    demo_object_pos,   # [B,N,L,M,2]
+                    T: int,            # horizon
+                    K: int = 10,       # refinement steps
+                    keypoints: torch.Tensor = None,  # [A,2] same KP set used in training loss
+                    init: str = "gauss"  # or "repeat_prev_zero"
+                    ):
+        """
+        Returns clean action sequence [B,T,4] in your (dx,dy,theta,state) parameterisation.
+        """
+        device = curr_agent_info.device
+        B = curr_agent_info.shape[0]
+
+        # --- initialise noisy actions x^{(0)} -----------------------------------
+        if init == "gauss":
+            dxdy = torch.randn(B, T, 2, device=device) * (self.max_translation / 10.0)
+            theta = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/6)  # ~±30°
+            state = torch.full((B,T,1), 0.5, device=device)
+        else:
+            dxdy = torch.zeros(B, T, 2, device=device)
+            theta = torch.zeros(B, T, 1, device=device)
+            state = torch.full((B,T,1), 0.5, device=device)
+
+        actions = torch.cat([dxdy, theta, state], dim=-1)  # [B,T,4]
+
+        # --- keypoints (must match training) ------------------------------------
+        if keypoints is None:
+            # default to the same “star” pattern used in PerNodeDenoisingMSELoss
+            kp = torch.tensor(
+                [[ 0.00,  0.00],
+                [ 1.00,  0.00],
+                [-1.00,  0.00],
+                [ 0.00,  1.00],
+                [ 0.00, -1.00],
+                [ 0.70,  0.70]], device=device, dtype=actions.dtype
+            )  # [A,2]
+        else:
+            kp = keypoints.to(device=device, dtype=actions.dtype)  # [A,2]
+        A = kp.shape[0]
+
+        # --- iterative refinement ------------------------------------------------
+        for _ in range(K):
+            # 1) predict per-node denoising directions ε_pred: [B,T,A,5]
+            eps_pred = self.policy(
+                curr_agent_info, curr_object_pos,
+                demo_agent_info, demo_object_pos,
+                actions
+            )
+
+            # split components
+            dt = eps_pred[..., 0:2]                   # [B,T,A,2] (same across A ideally)
+            dr = eps_pred[..., 2:4]                   # [B,T,A,2]
+            ds = eps_pred[..., 4]                     # [B,T,A]
+
+            # 2) Build current (noisy) node positions under actions
+            Rn = self._rot2d(actions[..., 2])         # [B,T,2,2]
+            tn = actions[..., 0:2]                    # [B,T,2]
+            Pn = torch.einsum("btij,aj->btai", Rn, kp) + tn.unsqueeze(-2)  # [B,T,A,2]
+
+            # 3) Predicted clean node positions = current + predicted residuals
+            #    also add the (shared) translation residual mean for stability
+            dt_mean = dt.mean(dim=-2)                 # [B,T,2]
+            Q = Pn + dr + dt_mean.unsqueeze(-2)       # [B,T,A,2]
+
+            # 4) Recover SE(2) update via SVD (Pn -> Q)
+            R_upd, t_upd = self._svd_align_2d(Pn, Q)  # [B,T,2,2], [B,T,2]
+
+            # 5) Apply update to (dx,dy,theta) – left-compose
+            #    Compose angles via atan2 from R_upd
+            dth = torch.atan2(R_upd[...,1,0], R_upd[...,0,0]).unsqueeze(-1)  # [B,T,1]
+            theta = (theta + dth + torch.pi) % (2*torch.pi) - torch.pi
+
+            dxdy = dxdy + t_upd  # translation in world frame
+            actions = torch.cat([dxdy, theta, state], dim=-1)
+
+            # 6) Update gripper state with a small step & clamp
+            ds_mean = ds.mean(dim=-1, keepdim=True)   # [B,T,1]
+            state = (state + ds_mean).clamp(0., 1.)
+            actions = torch.cat([dxdy, theta, state], dim=-1)
+
+        # final clean actions
+        return actions  # [B,T,4]
 
     # get unnormalised noise and project to SE(2) to add noise 
     def add_action_noise(self, actions: torch.Tensor, t: torch.Tensor):
@@ -182,3 +270,32 @@ class Agent(nn.Module):
         
         denoising_directions_normalised = denoising_directions_normalised[:4] * self.max_translation 
         return denoising_directions_normalised 
+
+    def _rot2d(self, theta):
+        c, s = torch.cos(theta), torch.sin(theta)
+        return torch.stack([torch.stack([c, -s], -1),
+                            torch.stack([s,  c], -1)], -2)  # [...,2,2]
+
+    @torch.no_grad()
+    def _svd_align_2d(self, P, Q):
+        """
+        R,t that best aligns P->Q (Procrustes).
+        P,Q: [B,T,A,2]
+        Returns R:[B,T,2,2], t:[B,T,2]
+        """
+        muP = P.mean(dim=-2, keepdim=True)  # [B,T,1,2]
+        muQ = Q.mean(dim=-2, keepdim=True)
+        Pc, Qc = P - muP, Q - muQ
+        # H = Pc^T Qc
+        H = torch.einsum("btai,btaj->btij", Pc, Qc)  # [B,T,2,2]
+        U, S, Vh = torch.linalg.svd(H)
+        R = torch.einsum("btik,btkj->btij", Vh, U.transpose(-2,-1))
+        # fix reflection
+        det = torch.det(R).unsqueeze(-1).unsqueeze(-1)  # [B,T,1,1]
+        Vh_fix = Vh.clone()
+        mask = (det < 0)
+        if mask.any():
+            Vh_fix[mask, :, -1] *= -1
+            R = torch.einsum("btik,btkj->btij", Vh_fix, U.transpose(-2,-1))
+        t = (muQ - torch.einsum("btij,btaj->btai", R, muP)).squeeze(-2)  # [B,T,2]
+        return R, t  # aligns P -> Q

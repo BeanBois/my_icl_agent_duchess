@@ -9,7 +9,7 @@ class GameInterface:
     agent_keypoints = Player(100,100).get_keypoints(frame='self')
 
 
-    def __init__(self,num_edibles = NUM_OF_EDIBLE_OBJECT, num_obstacles = NUM_OF_OBSTACLES, num_sampled_points = 10, mode = GameMode.DEMO_MODE):
+    def __init__(self,num_edibles = NUM_OF_EDIBLE_OBJECT, num_obstacles = NUM_OF_OBSTACLES, mode = GameMode.DEMO_MODE):
         # dont run headless
         if 'SDL_VIDEODRIVER' in os.environ:
             del os.environ['SDL_VIDEODRIVER']
@@ -17,7 +17,6 @@ class GameInterface:
         self.game = Game(num_edibles=num_edibles, num_obstacles=num_obstacles)
         self.running = True
         self.t = 0
-        self.num_sampled_points = num_sampled_points
         self.mode = mode
         self.observations = []
 
@@ -38,7 +37,7 @@ class GameInterface:
     def change_mode(self,mode):
         self.mode = mode
 
-    def get_obs(self):
+    def get_obs(self, track = True):
         agent_pos = self._get_agent_pos()
         agent_state = self.game.player.state # works now but maybe refactor
         # Since our 'point clouds' are represented as pixels in a 2d grid, our dense point cloud will be a 2d matrix of Screen-width x Screen-height
@@ -63,9 +62,11 @@ class GameInterface:
             'agent-orientation' : self.game.player.get_orientation('deg'),
             #game info
             'done': not self.running,
-            'time' : self.t
+            'time' : self.t,
+            'won' : self.game.game_won 
         }
-        self.observations.append(obs)
+        if track:
+            self.observations.append(obs)
         return obs 
 
     def step(self,action = None):
