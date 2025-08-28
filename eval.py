@@ -302,7 +302,7 @@ if __name__ == "__main__":
         tau=cfg.tau
 
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
-    agent_state_dict = torch.load('/checkpoints/...', map_location="cpu")
+    agent_state_dict = torch.load('agent.pt', map_location="cpu")
     agent.load_state_dict(state)
 
     print('Start evaluating')
