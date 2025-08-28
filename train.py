@@ -456,7 +456,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 50000
+    max_steps: int = 20000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -527,7 +527,9 @@ if __name__ == "__main__":
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],
                   lr=cfg.lr, weight_decay=cfg.weight_decay)
-    scaler = torch.cpu.amp.GradScaler(enabled=cfg.amp)
+    # scaler = torch.cpu.amp.GradScaler(enabled=cfg.amp)
+    use_amp = cfg.amp and torch.cuda.is_available()
+    scaler = torch.amp.GradScaler(cfg.device, enabled=use_amp)
 
     step = 0
     agent.train()
@@ -551,10 +553,9 @@ if __name__ == "__main__":
             curr_time = dev(item.curr_time)
 
             optim.zero_grad(set_to_none=True)
-            use_amp = cfg.amp and torch.cuda.is_available()
-            scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+            
 
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with torch.amp.autocast(cfg.device, enabled=use_amp):
 
                 pred_pn_denoising_dir, noisy_actions = agent.forward(
                     curr_agent_info,
