@@ -162,7 +162,6 @@ def save_demo_metadata(demo, filepath):
     except Exception as e:
         print(f"Warning: Could not save metadata: {e}")
 
-# Enhanced save_demo function with metadata
 def save_demo_with_metadata(demo, filepath):
     """
     Save demo and its metadata.
@@ -173,8 +172,6 @@ def save_demo_with_metadata(demo, filepath):
     """
     save_demo(demo, filepath)
     save_demo_metadata(demo, filepath)
-# Include the save_demo functions here (from the artifact above)
-# ... [save_demo, load_demo, save_demo_metadata functions] ...
 
 def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSET_SIZE):
     """Collect human demonstrations across different configurations."""
@@ -224,7 +221,8 @@ def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSE
             
             # Save demo with metadata
             demo_path = filepath + f'demo{j}'
-            save_demo_with_metadata(demo, demo_path)
+            # save_demo_with_metadata(demo, demo_path)
+            save_demo(demo, demo_path)
             
             print(f"Demo {j} completed: {len(demo)} observations saved")
         
