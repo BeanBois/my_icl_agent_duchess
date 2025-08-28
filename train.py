@@ -489,8 +489,6 @@ class TrainConfig:
 
 if __name__ == "__main__":
     from agent import GeometryEncoder, fulltrain_geo_enc2d
-    import torch
-    from contextlib import nullcontext
 
     
     cfg = TrainConfig()
@@ -533,7 +531,8 @@ if __name__ == "__main__":
 
     step = 0
     agent.train()
-
+    avg_losses = []
+    avg_loss = 0
     while step < cfg.max_steps:
         for item in dl:
             step += 1
@@ -579,7 +578,12 @@ if __name__ == "__main__":
             scaler.step(optim)
             scaler.update()
 
+            # update loss
+            avg_loss += loss.item()
+
             if step % cfg.log_every == 0:
+                avg_losses.append((step, avg_loss/cfg.log_every))
+                avg = 0
                 print(f"[step {step:6d}] loss={loss.item():.4f}")
 
             if step % cfg.ckpt_every == 0:
@@ -593,5 +597,7 @@ if __name__ == "__main__":
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
 
+    avg_loss_arr = np.array(avg_losses)
+    np.save('model_losses',avg_loss_arr)
 
 
