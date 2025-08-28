@@ -593,7 +593,7 @@ if __name__ == "__main__":
                     "optim": optim.state_dict(),
                     "cfg": cfg.__dict__,
                 }
-                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pt")
+                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pth")
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
 

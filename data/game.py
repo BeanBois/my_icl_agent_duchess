@@ -3,7 +3,7 @@ from .game_aux import *
 import random
 import json
 import os
-from game_obj import GameDifficulty, make_objective_strategy, GameObjective
+from .game_obj import GameDifficulty, make_objective_strategy, GameObjective
 
 class Game:
     
