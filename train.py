@@ -584,7 +584,7 @@ if __name__ == "__main__":
 
             if step % cfg.log_every == 0:
                 avg_losses.append((step, avg_loss/cfg.log_every))
-                print(f"[step {step:6d}] avg_loss={avg_loss:.4f}")
+                print(f"[step {step:6d}] avg_loss={avg_loss/cfg.log_every:.4f}")
                 avg_loss = 0
 
             if step % cfg.ckpt_every == 0:
