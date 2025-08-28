@@ -227,7 +227,7 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
 def action_from_vec(action): #x,y,theta,state_change [4] vector  
     state_action = None 
     for state in PlayerState:
-        if round(action[-1]) == state.value:
+        if round(torch.clamp(action[-1],0,1)) == state.value:
             state_action = state
             break 
     action_obj = Action(
