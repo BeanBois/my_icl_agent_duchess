@@ -16,7 +16,7 @@ class Game:
         num_obstacles : int= NUM_OF_OBSTACLES, 
         screen_width = SCREEN_WIDTH, 
         screen_height = SCREEN_HEIGHT,
-        player_start_pos = (PLAYER_START_X, PLAYER_START_Y)
+        player_start_pos = None
         ):
 
         self.num_edibles = num_edibles
@@ -29,6 +29,11 @@ class Game:
         
         # Initialize game objects
         self.player_start_pos = player_start_pos
+        if player_start_pos is None:
+            player_starting_pos_x =  np.random.randint(0 + Player.width ,self.screen_width - Player.width) 
+            player_starting_pos_y =  np.random.randint(0 + Player.height,self.screen_height - Player.height) 
+            self.player_start_pos = (player_starting_pos_x, player_starting_pos_y)
+
         self.player = Player(self.player_start_pos[0], self.player_start_pos[1])
         self.edibles = []
         self.obstacles = []
@@ -190,7 +195,7 @@ class Game:
             'screen_height': self.screen_height,
             'objective': self.objective.value if self.objective else None,
             'objective_cfg' : self.objective_cfg,
-            'player_start_pos': self.player_start_pos,
+            # 'player_start_pos': self.player_start_pos,
             
             # Game objects positions and properties
             'edibles': [
@@ -257,8 +262,10 @@ class Game:
             self.num_obstacles = config.get('num_obstacles', NUM_OF_OBSTACLES)
             self.screen_width = config.get('screen_width', SCREEN_WIDTH)
             self.screen_height = config.get('screen_height', SCREEN_HEIGHT)
-            self.player_start_pos = tuple(config.get('player_start_pos', (PLAYER_START_X, PLAYER_START_Y)))
-            
+            # self.player_start_pos = tuple(config.get('player_start_pos', (PLAYER_START_X, PLAYER_START_Y)))
+            player_starting_pos_x =  np.random.randint(0 + Player.width ,self.screen_width - Player.width) 
+            player_starting_pos_y =  np.random.randint(0 + Player.height,self.screen_height - Player.height) 
+            self.player_start_pos = (player_starting_pos_x, player_starting_pos_y)
             # Load objective
             objective_value = config.get('objective')
             if objective_value:

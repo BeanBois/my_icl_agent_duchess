@@ -46,7 +46,8 @@ class Action:
     
 
 class Player:
-    
+    width = PLAYER_SIZE
+    height = PLAYER_SIZE
     def __init__(self, x, y, state : PlayerState = PlayerState.NOT_EATING, screen_width = SCREEN_WIDTH, screen_height = SCREEN_HEIGHT):
         self.x = x
         self.y = y
