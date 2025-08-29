@@ -1,0 +1,32 @@
+{
+    "screen_width": 800,
+    "screen_height": 600,
+    "objective": 1,
+    "objective_cfg": {
+        "difficulty": null,
+        "target": [
+            404.7007678459942,
+            477.5068892000399
+        ]
+    },
+    "edibles": [
+        {
+            "x": 729,
+            "y": 347,
+            "width": 24,
+            "height": 20,
+            "eaten": false
+        },
+        {
+            "x": 194,
+            "y": 229,
+            "width": 20,
+            "height": 25,
+            "eaten": false
+        }
+    ],
+    "obstacles": [],
+    "goal": null,
+    "game_over": false,
+    "game_won": false
+}
