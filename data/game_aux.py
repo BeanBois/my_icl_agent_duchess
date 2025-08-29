@@ -260,13 +260,13 @@ class EdibleObject:
     def rotate_left(self, radius):
 
         angle = -PLAYER_ROTATION_SPEED
-        theta = math.radians(theta)
+        theta = math.radians(angle)
         self.x += radius * math.cos(theta)
         self.y += radius * math.sin(theta)
  
     def rotate_right(self, radius):
         angle = PLAYER_ROTATION_SPEED
-        theta = math.radians(theta)
+        theta = math.radians(angle)
         self.x += radius * math.cos(theta)
         self.y += radius * math.sin(theta)
 
