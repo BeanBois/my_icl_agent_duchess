@@ -174,13 +174,6 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
         dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
         return torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
 
-    def mat_to_vec(m9: torch.Tensor) -> torch.Tensor:
-        M = m9.view(3, 3)
-        tx = M[0, 2]
-        ty = M[1, 2]
-        theta = torch.atan2(M[1, 0], M[0, 0])
-        return torch.stack([tx, ty, theta], dim=0)  # [3]
-
     for b in range(B):
         demos = context[b]  # list of N demos
         assert len(demos) == N, f"Expected {N} demos, got {len(demos)}"
@@ -224,15 +217,17 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
 
     return demo_agent_info, demo_object_pos
 
-def action_from_vec(action): #x,y,theta,state_change [4] vector  
+def action_from_vec(actions): #x,y,theta,state_change [4] vector 
+    breakpoint() 
+    action = actions[0]
     state_action = None 
     for state in PlayerState:
-        if round(torch.clamp(action[-1],0,1)) == state.value:
+        if round(torch.clamp(action[-1],0,1).item()) == state.value:
             state_action = state
             break 
     action_obj = Action(
         forward_movement = int(math.sqrt(action[0]**2 + action[1]**2)),
-        rotation_deg = torch.deg(action[2]),
+        rotation_deg = torch.rad2deg(action[2]),
         state_change = state_action
     )
     return action_obj 
@@ -241,16 +236,16 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 max_iter = 50, refine=10, keypoints=AGENT_KEYPOINTS, manual = True):
     
     demos = collect_demos(game_interface, num_demos, manual, max_demo_length)
-    horizon = agent.pred_horizon
+    horizon = agent.policy.pred_horizon
     done = False
     _t = 0
     # start game
     game_interface.change_mode(GameMode.AGENT_MODE)
     curr_obs = game_interface.start_game()
-    demo_agent_info, demo_object_pos = process_context(demos)
+    demo_agent_info, demo_object_pos = process_context([demos],1, num_demos, max_demo_length, cfg.num_sampled_pc, 4, cfg.device)
     won = False 
     while not done and _t < max_iter:
-        curr_agent_info, curr_object_pos = process_obs(curr_obs)
+        curr_agent_info, curr_object_pos = process_obs([curr_obs], 1, 4, cfg.num_sampled_pc, cfg.device)
         for _ in range(horizon):
             actions = agent.plan_actions(
                 curr_agent_info = curr_agent_info,         # shape as in training
@@ -302,19 +297,20 @@ if __name__ == "__main__":
         tau=cfg.tau
 
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
-    agent_state_dict = torch.load('agent.pt', map_location="cpu")
-    agent.load_state_dict(state)
+    agent_state_dict = torch.load('agent.pth', map_location="cpu")
+    agent.load_state_dict(agent_state_dict['model'])
 
     print('Start evaluating')
     num_rollouts = 10
     wins = 0
+    kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
     for _ in range(num_rollouts):
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,
             # num_edibles=1,
             # num_obstacles=1,
         )
-        wins += int(rollout_once(game_interface, agent))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp))
     print(f'Won {wins} / {num_rollouts}!')
     
 

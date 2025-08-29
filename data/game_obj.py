@@ -104,7 +104,7 @@ class ReachGoalStrategy(ObjectiveStrategy):
 @dataclass
 class ParkingTarget:
     x: float; y: float; theta_deg: float
-    pos_threshold: float = 5.0
+    pos_threshold: float = 10.0
     ang_threshold_deg: float = 10.0
 
 class ParkAtPoseStrategy(ObjectiveStrategy):
@@ -154,7 +154,7 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
         # position
         dx = px - self.target.x; dy = py - self.target.y
         pos_ok = math.hypot(dx, dy) <= self.target.pos_threshold
-
+        print(dx,dy)
         if self.difficulty == GameDifficulty.EASY:
             return pos_ok
         # angle (wrap)
@@ -177,15 +177,15 @@ class PushSpec:
     goal_x: float; goal_y: float; goal_radius: float = 12.0
 
 class PushObjectToGoalStrategy(ObjectiveStrategy):
-    def __init__(self, spec: PushSpec = None, difficulty = GameDifficulty.EASY):
+    def __init__(self, spec: PushSpec = None, difficulty = GameDifficulty.EASY, obj_pos = None):
         self.spec = spec
-        self.object_pos = None 
+        self.object_pos = (200, 400) 
         self.difficulty = difficulty
 
 
     def setup(self, game):
         game.goal = Goal(int(self.spec.goal_x), int(self.spec.goal_y))
-        game.edibles = [EdibleObject(int(self.object_pos[0]), int(self.object_pos[1]))]
+        game.edibles.append(EdibleObject(int(self.object_pos[0]), int(self.object_pos[1])))
 
     def draw(self, game):
         for edible in game.edibles:
@@ -224,11 +224,11 @@ def make_objective_strategy(game, cfg=None):
         return EatAllStrategy()
     if game.objective == GameObjective.REACH_GOAL:
         return ReachGoalStrategy()
-    if getattr(game, 'objective', None) == GameObjective(3):  # or add enum PARK_AT_POSE
+    if getattr(game, 'objective', None) == GameObjective.PARKING:  # or add enum PARK_AT_POSE
         x,y = cfg['target']
         parking_target = ParkingTarget(x,y,0)
         return ParkAtPoseStrategy(parking_target, cfg['difficulty'])
-    if getattr(game, 'objective', None) == GameObjective(4):  # or add enum PUSH_OBJECT_TO_GOAL
+    if getattr(game, 'objective', None) == GameObjective.PUSH_AND_PLACE:  # or add enum PUSH_OBJECT_TO_GOAL
         x,y = cfg['target']
         push_spec = PushSpec(x,y)
         return PushObjectToGoalStrategy(push_spec, cfg['difficulty'])

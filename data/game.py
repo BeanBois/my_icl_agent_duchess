@@ -71,6 +71,10 @@ class Game:
         objective_str = None
         if self.objective is GameObjective.EAT_ALL:
             objective_str = "eat all food"
+        elif self.objective is GameObjective.PARKING:
+            objective_str = "parking"
+        elif self.objective is GameObjective.PUSH_AND_PLACE:
+            objective_str = 'push and place'
         else:
             objective_str = "reach goal"
         print(f"Welcome to the game, your objective is to {objective_str}")
@@ -113,7 +117,7 @@ class Game:
                     obj = self.edibles[0]
                     in_contact = obj.eaten 
                     if in_contact:
-                        obj.rotate_right(self.player.sizes)
+                        obj.rotate_right(self.player.size)
 
         return True
 
