@@ -27,7 +27,7 @@ class EatAllStrategy(ObjectiveStrategy):
         pass 
 
     def setup(self, game): 
-        for _ in range(game.num_edibles):
+        for _ in range(2):
             x = random.randint(50, game.screen_width - 50)
             y = random.randint(50, game.screen_height - 50)
             # Make sure edibles don't spawn too close to player
@@ -63,7 +63,7 @@ class ReachGoalStrategy(ObjectiveStrategy):
         pass 
 
     def setup(self, game): 
-        for _ in range(game.num_obstacles):
+        for _ in range(1):
             x = random.randint(50, game.screen_width - 50)
             y = random.randint(50, game.screen_height - 50)
             # Make sure obstacles don't spawn too close to player
@@ -74,8 +74,8 @@ class ReachGoalStrategy(ObjectiveStrategy):
             width = random.randint(30, 50)
             height = random.randint(30, 50)
             game.obstacles.append(Obstacle(x, y, width, height))
-            goal_position = (game.screen_width - 100 + np.random.randint(-25,25), game.screen_height - 100 + np.random.randint(-25,25))
-            game.goal = Goal(goal_position[0], goal_position[1])
+        goal_position = (game.screen_width - 100 + np.random.randint(-25,25), game.screen_height - 100 + np.random.randint(-25,25))
+        game.goal = Goal(goal_position[0], goal_position[1])
 
     def update(self, game):
 
