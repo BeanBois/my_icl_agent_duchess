@@ -302,8 +302,8 @@ if __name__ == "__main__":
         tau=cfg.tau
 
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
-    agent_state_dict = torch.load('agent.pt', map_location="cpu")
-    agent.load_state_dict(state)
+    agent_state_dict = torch.load('agent.pth', map_location="cpu")
+    agent.load_state_dict(agent_state_dict['model'])
 
     print('Start evaluating')
     num_rollouts = 10
