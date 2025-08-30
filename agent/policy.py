@@ -51,7 +51,7 @@ class Policy(nn.Module):
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
-        self.contextualiser = CurrentHypTokenRefiner(
+        self.hyp_context = CurrentHypTokenRefiner(
             Dh=2, Dg=self.euc_dim, K=2, c = self.curvature
         )
         self.context_alignment = ProductManifoldAttention(
@@ -154,7 +154,7 @@ class Policy(nn.Module):
 
         ### then get curr hyp emb
         # curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
-        curr_hyp_emb = self.contextualiser(demo_hyp_all, curr_rho_batch)
+        curr_hyp_emb = self.hyp_context(demo_hyp_all, curr_rho_batch)
         ############################ Then Context Align demos & curr obs (phi) ############################ 
         curr_latent_var = self.context_alignment(
             curr_rho_batch,
@@ -196,7 +196,7 @@ class Policy(nn.Module):
         flat_pred_rho_batch = pred_node_emb['agent'] # [B*T, num_agent_nodes, self.euc_dim]
         pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
         # pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
-        pred_hyp_emb = self.contextualiser(demo_hyp_all, flat_pred_rho_batch).view(B,T,-1)
+        pred_hyp_emb = self.hyp_context(demo_hyp_all, flat_pred_rho_batch).view(B,T,-1)
         
         # then context allign 
         _pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1)
@@ -227,66 +227,6 @@ class Policy(nn.Module):
 
         return denoising_direction
 
-    # def _perform_reverse_action(self,
-    #                             actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
-    #                             curr_object_pos: torch.Tensor, # [B, M, 2]
-    #                             curr_agent_info: torch.Tensor  # [B, A, 6]: [ax, ay, cos, sin, grip, state_gate?]
-    #                             ):
-    #     """
-    #     Apply inverse SE(2) to OBJECTS ONLY to simulate agent motion.
-    #     Agents do not move here. Their info only changes in the gripper/state
-    #     channel when state_action != current grip (per time step, per agent).
-    #     """
-    #     B, T, _ = actions.shape
-    #     _, M, _ = curr_object_pos.shape
-    #     _, A, C = curr_agent_info.shape
-    #     device  = curr_object_pos.device
-    #     dtype   = curr_object_pos.dtype
-
-    #     # ---- split action channels ----
-    #     dxdy   = actions[..., 0:2]            # [B,T,2]
-    #     dtheta = actions[..., 2]              # [B,T]
-    #     sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
-
-    #     # ---- OBJECTS: inverse SE(2) applied unconditionally ----
-    #     # p_prev = R(-dθ) @ (p_curr - [dx,dy])
-    #     dxdy_bt12 = dxdy.view(B, T, 1, 2)           # [B,T,1,2]
-    #     obj_b1m2  = curr_object_pos.view(B, 1, M, 2)
-    #     delta     = obj_b1m2 - dxdy_bt12            # [B,T,M,2]
-
-    #     c = torch.cos(-dtheta).view(B, T, 1, 1)     # [B,T,1,1]
-    #     s = torch.sin(-dtheta).view(B, T, 1, 1)
-
-    #     x = delta[..., 0:1]
-    #     y = delta[..., 1:2]
-    #     x_rot =  c * x + s * y
-    #     y_rot = -s * x + c * y
-    #     pred_object_pos = torch.cat([x_rot, y_rot], dim=-1)  # [B,T,M,2]
-
-    #     # ---- AGENTS: positions/orientations stay fixed; only grip may toggle ----
-    #     # Broadcast static agent info across time
-    #     ax   = curr_agent_info[..., 0].unsqueeze(1).expand(B, T, A)  # [B,T,A]
-    #     ay   = curr_agent_info[..., 1].unsqueeze(1).expand(B, T, A)
-    #     cth  = curr_agent_info[..., 2].unsqueeze(1).expand(B, T, A)
-    #     sth  = curr_agent_info[..., 3].unsqueeze(1).expand(B, T, A)
-    #     grip = curr_agent_info[..., 4].unsqueeze(1).expand(B, T, A)
-
-    #     # Optional pass-through gate channel
-    #     if C >= 6:
-    #         gate = curr_agent_info[..., 5].unsqueeze(1).expand(B, T, A)
-    #     else:
-    #         gate = torch.ones(B, T, A, device=device, dtype=dtype)
-
-    #     # Compare desired state to current grip; update ONLY when they differ
-    #     sa_bta = sa.unsqueeze(-1).expand(B, T, A)   # [B,T,A]
-    #     change_mask = (sa_bta.round() != grip.round())  # bool
-
-    #     grip_out = torch.where(change_mask, sa_bta, grip)  # set to command when different, else keep
-
-    #     # Repack without moving agents
-    #     pred_agent_info = torch.stack([ax, ay, cth, sth, grip_out, gate], dim=-1)  # [B,T,A,6]
-
-    #     return pred_object_pos, pred_agent_info
 
     def _perform_reverse_action(self,
                                 actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
