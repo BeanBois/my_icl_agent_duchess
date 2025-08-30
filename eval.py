@@ -8,9 +8,11 @@ import math
 
 from typing import List,Dict, Tuple
 
-from data import PseudoDemoGenerator, GameMode, Action 
+from data import PseudoDemoGenerator, GameMode, Action, GameObjective 
 from train import PseudoDemoDataset  
 from math import sqrt
+from collect_human_demo import load_and_inspect_demo, DEMOSET_SIZE, load_demo_config
+import random 
 
 AGENT_KEYPOINTS = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]   
 
@@ -30,10 +32,21 @@ def collect_demos(game_interface, num_demos, manual=True, max_demo_length = 20):
                 provided_demos.append(observations)
             
             game_interface.reset()
-        return provided_demos
-    
+    else:
+        demoset_id = game_interface.game.objective.value - 1
+        chosen_demos = torch.randint(0,DEMOSET_SIZE, (num_demos,))
+        for idx in chosen_demos:
+            demo  = load_and_inspect_demo(demoset_id=demoset_id, demo_id=idx)
+            provided_demos.append(demo)
+        
+        # set config to match demos
+        filepath = f'human_demo/demoset{demoset_id}/'
+        config_path = filepath + 'demo_config.json'
+
+        game_interface.set_initial_config(config_path)
+
     print(f"Collected {len(provided_demos)} demonstrations")
-    pass
+    return provided_demos
 
 def downsample_obs(observations, target_length):
         """
@@ -218,7 +231,6 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
     return demo_agent_info, demo_object_pos
 
 def action_from_vec(actions): #x,y,theta,state_change [4] vector 
-    breakpoint() 
     action = actions[0]
     state_action = None 
     for state in PlayerState:
@@ -233,8 +245,7 @@ def action_from_vec(actions): #x,y,theta,state_change [4] vector
     return action_obj 
 
 def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20, 
-                max_iter = 50, refine=10, keypoints=AGENT_KEYPOINTS, manual = True):
-    
+                max_iter = 100, refine=10, keypoints=AGENT_KEYPOINTS, manual = True):
     demos = collect_demos(game_interface, num_demos, manual, max_demo_length)
     horizon = agent.policy.pred_horizon
     done = False
@@ -246,23 +257,24 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
     won = False 
     while not done and _t < max_iter:
         curr_agent_info, curr_object_pos = process_obs([curr_obs], 1, 4, cfg.num_sampled_pc, cfg.device)
-        for _ in range(horizon):
-            actions = agent.plan_actions(
-                curr_agent_info = curr_agent_info,         # shape as in training
-                curr_object_pos = curr_object_pos,
-                demo_agent_info = demo_agent_info,
-                demo_object_pos = demo_object_pos,
-                T = horizon,
-                K = refine,
-                keypoints = keypoints
-            )  # [B,T,4]
-            a0 = actions[:, 0]  # execute first step
+        # for _ in range(horizon):
+        actions = agent.plan_actions(
+            curr_agent_info = curr_agent_info,         # shape as in training
+            curr_object_pos = curr_object_pos,
+            demo_agent_info = demo_agent_info,
+            demo_object_pos = demo_object_pos,
+            T = horizon,
+            K = refine,
+            keypoints = keypoints
+        )  # [B,T,4]
+        for a0 in actions: 
             action_obj = action_from_vec(a0)
             curr_obs = game_interface.step(action_obj)
             done = curr_obs['done']
             if done:
                 won = curr_obs['won']
                 break
+            _t +=1
     return won 
         
 
@@ -302,16 +314,18 @@ if __name__ == "__main__":
 
     print('Start evaluating')
     num_rollouts = 10
-    wins = 0
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
+    # for objective in GameObjective:
+    wins = 0
+    objective = GameObjective.REACH_GOAL
     for _ in range(num_rollouts):
+        # breakpoint()
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,
-            # num_edibles=1,
-            # num_obstacles=1,
+            objective=objective
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp))
-    print(f'Won {wins} / {num_rollouts}!')
+        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=50))
+    print(f'Won {wins} / {num_rollouts} for {objective}')
     
 
 

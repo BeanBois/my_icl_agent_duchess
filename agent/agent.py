@@ -82,7 +82,7 @@ class Agent(nn.Module):
         # --- initialise noisy actions x^{(0)} -----------------------------------
         if init == "gauss":
             dxdy = torch.randn(B, T, 2, device=device) * (self.max_translation / 10.0)
-            theta = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/6)  # ~±30°
+            theta = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/6)  # +/- 30°
             state = torch.full((B,T,1), 0.5, device=device)
         else:
             dxdy = torch.zeros(B, T, 2, device=device)
@@ -91,20 +91,18 @@ class Agent(nn.Module):
 
         actions = torch.cat([dxdy, theta, state], dim=-1)  # [B,T,4]
 
-        # --- keypoints (must match training) ------------------------------------
+
         if keypoints is None:
             # default to the same “star” pattern used in PerNodeDenoisingMSELoss
             kp = torch.tensor(
-                [[ 0.00,  0.00],
-                [ 1.00,  0.00],
-                [-1.00,  0.00],
-                [ 0.00,  1.00],
-                [ 0.00, -1.00],
-                [ 0.70,  0.70]], device=device, dtype=actions.dtype
+                [(20, 0), 
+                 (-14.747874310824908, 13.509263611023021), 
+                 (-14.747874310824908, -13.509263611023021), 
+                 (0, 0)], device=device, dtype=actions.dtype
             )  # [A,2]
         else:
             kp = keypoints.to(device=device, dtype=actions.dtype)  # [A,2]
-        A = kp.shape[0]
+            A = kp.shape[0]
 
         # --- iterative refinement ------------------------------------------------
         for _ in range(K):

@@ -118,7 +118,7 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
 
         # create 3 obstacles walls around parking space of PLAYER_SIZE * 2.5 
         # walls (short side) are of width 10  
-        space = PLAYER_SIZE * 2.5 
+        space = PLAYER_SIZE * 3
         wall_thickness = 10
         wall1 = Obstacle(self.target.x + space//2, self.target.y, width=wall_thickness, height=space)
         wall2 = Obstacle(self.target.x - space//2, self.target.y,width=wall_thickness, height=space)
@@ -142,9 +142,9 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
     def draw(self, game):
         # could draw a small orientation arrow at target.theta_deg if you like
         game.goal.draw(game.screen)
-        if self.difficulty == GameDifficulty.HARD:
-            for obstacle in game.obstacles:
-                obstacle.draw(game.screen)
+        # if self.difficulty == GameDifficulty.HARD:
+        for obstacle in game.obstacles:
+            obstacle.draw(game.screen)
 
     def is_success(self, game):
         if game.game_over:
@@ -154,12 +154,12 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
         # position
         dx = px - self.target.x; dy = py - self.target.y
         pos_ok = math.hypot(dx, dy) <= self.target.pos_threshold
-        print(dx,dy)
         if self.difficulty == GameDifficulty.EASY:
             return pos_ok
         # angle (wrap)
         d = (ang - self.target.theta_deg + 180.0) % 360.0 - 180.0
-        ang_ok = abs(d) <= self.target.ang_threshold_deg
+        ang_ok =(abs(d) <= self.target.ang_threshold_deg 
+    or abs(abs(d) - 180) <= self.target.ang_threshold_deg)
 
         # if self.difficulty == GameDifficulty.MEDIUM:
             # return pos_ok and ang_ok
@@ -199,14 +199,19 @@ class PushObjectToGoalStrategy(ObjectiveStrategy):
         px, py = game.player.get_pos()
         obj = game.edibles[0]
         obj_x, obj_y = obj.get_pos()
-        push_radius = min([game.player.size, obj.width, obj.height])
+        push_radius = min([game.player.size, obj.width, obj.height]) + 5
         if math.hypot(px - obj_x, py - obj_y) <= push_radius:
             if self.difficulty != GameDifficulty.EASY and game.player.state == PlayerState.EATING:
-                obj.eaten = True
+                # obj.eaten = True
+                obj.x = px 
+                obj.y = py 
             elif self.difficulty == GameDifficulty.EASY:
-                obj.eaten = True 
+                obj.x = px 
+                obj.y = py 
+                # obj.eaten = True 
         else:
-            obj.eateN = False
+            # obj.eaten = False
+            pass 
 
     
     def is_success(self, game):
