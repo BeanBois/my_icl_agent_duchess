@@ -92,34 +92,16 @@ class Game:
         if not self.game_over and not self.game_won:
             if keys[pygame.K_UP] or keys[pygame.K_w]:
                 self.player.move_forward()
-                # if self.objective == GameObjective.PUSH_AND_PLACE:
-                #     obj = self.edibles[0]
-                #     in_contact = obj.eaten 
-                #     if in_contact:
-                #         obj.move_forward(self.player.angle)
+       
             if keys[pygame.K_DOWN] or keys[pygame.K_s]:
                 self.player.move_backward()
-                # if self.objective == GameObjective.PUSH_AND_PLACE:
-                #     obj = self.edibles[0]
-                #     in_contact = obj.eaten 
-                #     if in_contact:
-                #         obj.move_backward(self.player.angle)
+               
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.player.rotate_left()
-                # if self.objective == GameObjective.PUSH_AND_PLACE:
-                #     obj = self.edibles[0]
-                #     in_contact = obj.eaten 
-                #     if in_contact:
-                #         obj.rotate_left(self.player.size)
+  
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
                 self.player.rotate_right()
-                # if self.objective == GameObjective.PUSH_AND_PLACE:
-                #     obj = self.edibles[0]
-                #     in_contact = obj.eaten 
-                #     if in_contact:
-                #         obj.rotate_right(self.player.size)
                 
-
         return True
 
     def handle_action(self,action : Action):
@@ -148,13 +130,9 @@ class Game:
         # reset variables 
         for edible in self.edibles:
             edible.eaten = False
-        
-        # self.edibles = []
-        # self.obstacles = []
-        # self.goal = None
+
         self.game_over = False
         self.game_won = False
-        # self.setup_game()
     
     def end_game(self):
         pygame.quit()

@@ -1,5 +1,3 @@
-
-# store game auxilaries like Player, Actions ect
 from .game_configs import *
 
 import math
@@ -43,7 +41,6 @@ class Action:
         vector[2] = self.state_change.value
         return vector 
 
-    
 
 class Player:
     width = PLAYER_SIZE
@@ -197,9 +194,6 @@ class Player:
             pygame.draw.polygon(screen, PURPLE, points)
 
 
-# we will refactor this when everything is done
-
-# change each to return get_pos-> (x,y) and get_kp
 class EdibleObject:
     def __init__(self, x, y, width=20, height=20):
         self.x = x
@@ -238,47 +232,6 @@ class EdibleObject:
                 'center': (self.x, self.y),
             }
 
-    # def move_forward(self, angle):
-    #     speed = PLAYER_SPEED
-    #     # Convert angle to radians and move in facing direction
-    #     rad = math.radians(angle)
-    #     self.x += speed * math.cos(rad)
-    #     self.y += speed * math.sin(rad)
-        
-    #     # self.x = max(self.width, min(self.screen_width - self.width, self.x))
-    #     # self.y = max(self.height, min(self.screen_height - self.height, self.y))
-    
-    # def move_backward(self, angle):
-    #     speed = PLAYER_SPEED
-    #     rad = math.radians(angle)
-    #     self.x -= speed * math.cos(rad)
-    #     self.y -= speed * math.sin(rad)
-        
-    #     # self.x = max(self.size, min(self.screen_width - self.width, self.x))
-    #     # self.y = max(self.size, min(self.screen_height - self.height, self.y))
-    
-    # def rotate_left(self, radius):
-
-    #     angle = -PLAYER_ROTATION_SPEED
-    #     theta = math.radians(angle)
-    #     self.x += radius * math.cos(theta)
-    #     self.y += radius * math.sin(theta)
- 
-    # def rotate_right(self, radius):
-    #     angle = PLAYER_ROTATION_SPEED
-    #     theta = math.radians(angle)
-    #     self.x += radius * math.cos(theta)
-    #     self.y += radius * math.sin(theta)
-
-    # def move_with_action(self,action : Action):
-    #     movement_vector = action.as_vector(mode='deg')
-    #     angle = movement_vector[1]
-    #     # Update position
-    #     theta_angle = np.deg2rad(angle)
-
-    #     self.x = int(self.x  + movement_vector[0] * np.cos(theta_angle))
-    #     self.y = int(self.y +  movement_vector[0] * np.sin(theta_angle))
-        
 
 class Obstacle:
     def __init__(self, x, y, width=40, height=40):
@@ -315,7 +268,8 @@ class Obstacle:
                 'bot-left': (self.x - self.width//2, self.y + self.height//2),
                 'center': (self.x, self.y),
             }
-    
+
+
 class Goal:
     def __init__(self, x, y, width=50, height=50):
         self.x = x
@@ -353,8 +307,6 @@ class Goal:
                 'bot-left': (self.x - self.width//2, self.y + self.height//2),
                 'center': (self.x, self.y),
             }
-
-
 
 # NEED TO INCORPORATE GAMEINTERFACE SUCH THAT IT CAN TAKE IN DEMO AND AGENT MOVES 
 class GameMode(Enum):
