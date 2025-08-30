@@ -10,10 +10,12 @@ class GameObjective(Enum):
     PUSH_AND_PLACE = 3
     PARKING = 4
 
+
 class GameDifficulty:
     EASY = 1
     MEDIUM = 2
     HARD = 3 
+
 
 class ObjectiveStrategy:
     def setup(self, game): ...
@@ -125,7 +127,7 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
         wall3 = Obstacle(self.target.x, self.target.y + space//2, width=space, height=wall_thickness )
         wall4 = Obstacle(self.target.x, self.target.y - space//2, width=space, height=wall_thickness )
         walls = [wall1, wall2, wall3, wall4]
-        rm_idx = random.randrange(len(walls))
+        rm_idx = random.randrange(2) # only remove wall1 or wall2 
         del walls[rm_idx]
         game.obstacles = walls 
 
@@ -140,9 +142,7 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
 
 
     def draw(self, game):
-        # could draw a small orientation arrow at target.theta_deg if you like
         game.goal.draw(game.screen)
-        # if self.difficulty == GameDifficulty.HARD:
         for obstacle in game.obstacles:
             obstacle.draw(game.screen)
 
@@ -160,15 +160,8 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
         d = (ang - self.target.theta_deg + 180.0) % 360.0 - 180.0
         ang_ok =(abs(d) <= self.target.ang_threshold_deg 
     or abs(abs(d) - 180) <= self.target.ang_threshold_deg)
-
-        # if self.difficulty == GameDifficulty.MEDIUM:
-            # return pos_ok and ang_ok
         return pos_ok and ang_ok
 
-        # we assume ON to be engine off, its confusing but using OFF will be to easy 
-        # player_state_ON = game.player.state == PlayerState.EATING 
-        
-        # return pos_ok and ang_ok and player_state_ON
         
 
 # New: Push-and-Place (simple goal check first)

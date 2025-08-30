@@ -38,6 +38,20 @@ def poincare_dist(x, y, c, eps=1e-9):
 
 
 # ---------- tree utilities ----------
+# clustering is done based on 2 conditions
+    # if next proceeding agent_info state has changed, then the next_proceeding obs becomes new parent
+    # else if abs(angle_parent - angle_next) > angular_granulity, then it becomes new parent
+# an example tree is as such : 
+#                   empty root 
+#                  /         \
+#                 1           7
+#                / \         / \
+#               2   4        8  10
+#              /.  /  \.     |.  | \
+#             3.  5.   6.    9.  11 12
+
+
+
 def _cluster(
         cluster_idxs,
         theta,
@@ -117,8 +131,6 @@ def build_temporal_tree_multigran_K(
         return parent, children
     return parent, children
         
-
-
 
 # ---------- SK-style hyperbolic constructor in 2D ----------
 class SKConstructor2D(nn.Module):

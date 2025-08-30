@@ -8,7 +8,7 @@ from utilities import *
 from .demo_handler import DemoHandler
 from .my_local_graph import build_local_heterodata_batch
 from .rho import Rho 
-from .foresight import PsiForesight
+from .foresight import IntraActionSelfAttn, PsiForesight
 from .pma import ProductManifoldAttention
 from .action_head import ProductManifoldGPHead, SimpleActionHead
 
@@ -66,6 +66,8 @@ class Policy(nn.Module):
             n_heads = num_att_heads,
             dropout=0.1
         )
+        
+        self.intra_action = IntraActionSelfAttn(z_dim=self.z_dim, n_heads=8, ff_mult=4, dropout=0.0)
 
         self.action_head = SimpleActionHead(
             in_dim=self.z_dim,
@@ -209,11 +211,13 @@ class Policy(nn.Module):
         # Z_current <= curr_latent_var [B,A,z]
         # Z_predicted <= pred_latent_variables [B,T, A, z_dim] * T = self.pred_horizon
         
-        final_embd = self.foresight_adjustment(
+        pred_embd = self.foresight_adjustment( 
             curr_latent_var, 
             pred_latent_variables,
             actions,
-        ) # [B, T, A, z_dim] propagate info from curr lv to pred lv like in IP 
+        ) # [B, T, A, z_dim] propagate info from curr latent var to pred latent var like in IP 
+
+        final_embd = self.intra_action(pred_embd) # let agent nodes within each timestep 'coordinate; amongst themselves
 
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
 

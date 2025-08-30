@@ -145,3 +145,54 @@ class PsiForesight(nn.Module):
         z_mid = self.ln_o(z_mid)
         z_out = z_mid + self.ff(z_mid)
         return z_out
+
+
+class IntraActionSelfAttn(nn.Module):
+    """
+    Self-attention over the A action/predicted nodes *within each time step*.
+    Input/output: [B, T, A, z]
+    """
+    def __init__(self, z_dim: int, n_heads: int = 8, ff_mult: int = 4, dropout: float = 0.0):
+        super().__init__()
+        assert z_dim % n_heads == 0
+        self.z = z_dim
+        self.h = n_heads
+        self.hd = z_dim // n_heads
+
+        self.ln = nn.LayerNorm(z_dim)
+        self.q = nn.Linear(z_dim, z_dim, bias=False)
+        self.k = nn.Linear(z_dim, z_dim, bias=False)
+        self.v = nn.Linear(z_dim, z_dim, bias=False)
+        self.o = nn.Linear(z_dim, z_dim, bias=False)
+
+        self.ffn_ln = nn.LayerNorm(z_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(z_dim, ff_mult * z_dim),
+            nn.GELU(),
+            nn.Linear(ff_mult * z_dim, z_dim),
+        )
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, z_pred: torch.Tensor) -> torch.Tensor:
+        """
+        z_pred: [B, T, A, z]
+        returns: [B, T, A, z]
+        """
+        B, T, A, Z = z_pred.shape
+
+        x = self.ln(z_pred)
+        q = self.q(x).view(B, T, A, self.h, self.hd)
+        k = self.k(x).view(B, T, A, self.h, self.hd)
+        v = self.v(x).view(B, T, A, self.h, self.hd)
+
+        # scores: [B, T, h, A, A]
+        scores = torch.einsum('btahd,btbhd->bthab', q, k) / math.sqrt(self.hd)
+        attn = scores.softmax(dim=-1)
+        out_h = torch.einsum('bthab,btbhd->btahd', attn, v)  # [B, T, A, h, hd]
+        out = self.o(out_h.reshape(B, T, A, Z))
+        out = self.drop(out)
+
+        x = z_pred + out                  # residual
+        y = self.ffn_ln(x)
+        y = x + self.ffn(y)               # FFN + residual
+        return y
