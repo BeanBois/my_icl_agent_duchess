@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 # ========= Poincaré ball utilities (curvature c > 0) =========
 
 def _safe_norm(x, dim=-1, keepdim=False, eps=1e-15):

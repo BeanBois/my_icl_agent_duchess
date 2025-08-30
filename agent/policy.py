@@ -10,6 +10,7 @@ from .my_local_graph import build_local_heterodata_batch
 from .rho import Rho 
 from .foresight import IntraActionSelfAttn, PsiForesight
 from .pma import ProductManifoldAttention
+from .refiner import CurrentHypTokenRefiner
 from .action_head import ProductManifoldGPHead, SimpleActionHead
 
 
@@ -50,6 +51,9 @@ class Policy(nn.Module):
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
+        self.contextualiser = CurrentHypTokenRefiner(
+            Dh=2, Dg=self.euc_dim, K=2, c = self.curvature
+        )
         self.context_alignment = ProductManifoldAttention(
             de = self.euc_dim,
             dh = self.hyp_dim,
@@ -59,14 +63,12 @@ class Policy(nn.Module):
             dropout = 0.1,
             proj_hidden = 0, 
         )
-        
         self.foresight_adjustment = PsiForesight(
             z_dim=self.z_dim,
             edge_dim=self.z_dim,
             n_heads = num_att_heads,
             dropout=0.1
         )
-        
         self.intra_action = IntraActionSelfAttn(z_dim=self.z_dim, n_heads=8, ff_mult=4, dropout=0.0)
 
         self.action_head = SimpleActionHead(
@@ -74,7 +76,7 @@ class Policy(nn.Module):
             hidden_dim=self.z_dim // 2
         )
 
-        self.curr_hyp_emb = nn.Parameter(torch.randn(self.hyp_dim))
+        # self.curr_hyp_emb = nn.Parameter(torch.randn(self.hyp_dim))
               
     def forward(self,
                 curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
@@ -151,7 +153,8 @@ class Policy(nn.Module):
             curr_rho_batch = curr_rho_batch.view(1,*temp)
 
         ### then get curr hyp emb
-        curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
+        # curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
+        curr_hyp_emb = self.contextualiser(demo_hyp_all, curr_rho_batch)
         ############################ Then Context Align demos & curr obs (phi) ############################ 
         curr_latent_var = self.context_alignment(
             curr_rho_batch,
@@ -192,7 +195,8 @@ class Policy(nn.Module):
         pred_node_emb, _ = self.rho(flat_pred_local_graphs)
         flat_pred_rho_batch = pred_node_emb['agent'] # [B*T, num_agent_nodes, self.euc_dim]
         pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
-        pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
+        # pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
+        pred_hyp_emb = self.contextualiser(demo_hyp_all, flat_pred_rho_batch).view(B,T,-1)
         
         # then context allign 
         _pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1)

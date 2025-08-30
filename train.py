@@ -13,47 +13,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 import numpy as np
 
-
-
-
-# ---------------------------
-# Small hyperbolic utilities
-# (Poincaré ball; curvature c>0)
-# ---------------------------
-class Poincare:
-    @staticmethod
-    def mobius_add(x, y, c):
-        x2 = (x * x).sum(dim=-1, keepdim=True)
-        y2 = (y * y).sum(dim=-1, keepdim=True)
-        xy = (x * y).sum(dim=-1, keepdim=True)
-        num = (1 + 2*c*xy + c*y2) * x + (1 - c*x2) * y
-        den = 1 + 2*c*xy + c*c*x2*y2
-        return num / torch.clamp(den, min=1e-15)
-
-    @staticmethod
-    def lambda_x(x, c):
-        return 2.0 / torch.clamp(1 - c*(x*x).sum(dim=-1, keepdim=True), min=1e-15)
-
-    @staticmethod
-    def poincare_dist(x, y, c, eps=1e-15):
-        # d_c(x,y) = arcosh(1 + 2c||x-y||^2 / ((1 - c||x||^2)(1 - c||y||^2)))
-        x2 = torch.clamp((x*x).sum(dim=-1), max=(1.0 - 1e-6)/c)  # keep inside ball
-        y2 = torch.clamp((y*y).sum(dim=-1), max=(1.0 - 1e-6)/c)
-        diff2 = ((x - y)**2).sum(dim=-1)
-        num = 2*c*diff2
-        den = (1 - c*x2) * (1 - c*y2)
-        z = 1 + torch.clamp(num / torch.clamp(den, min=eps), min=1+1e-7)
-        return torch.acosh(z)
-
-    @staticmethod
-    def project_to_ball(x, c, eps=1e-5):
-        # keep inside radius 1/sqrt(c)
-        r = 1.0 / math.sqrt(c)
-        norm = x.norm(dim=-1, keepdim=True).clamp(min=eps)
-        scale = torch.clamp((r - eps)/norm, max=1.0)
-        return x * scale
-
-
 # ---------------------------
 # Data interface (stub)
 # Replace with your real dataset that returns tensors
@@ -332,8 +291,6 @@ class PseudoDemoDataset(Dataset):
         demo_agent_action = torch.stack(all_demo_act, dim=0)       # [B,N,L-1,3]
         return demo_agent_info, demo_object_pos, demo_agent_action
 
-
-
 def collate_items(batch: List[Item]) -> Item:
     # Here each dataset __getitem__ already returns batched B samples;
     # if yours returns single samples, stack along dim 0 here.
@@ -483,8 +440,6 @@ class TrainConfig:
 
     # flags
     train_geo_encoder = True
-
-
 
 
 if __name__ == "__main__":
