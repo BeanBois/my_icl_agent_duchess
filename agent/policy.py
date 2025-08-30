@@ -229,7 +229,6 @@ class Policy(nn.Module):
         Agents do not move here. Their info only changes in the gripper/state
         channel when state_action != current grip (per time step, per agent).
         """
-        import torch
         B, T, _ = actions.shape
         _, M, _ = curr_object_pos.shape
         _, A, C = curr_agent_info.shape

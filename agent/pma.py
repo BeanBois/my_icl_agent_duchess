@@ -87,14 +87,6 @@ class ProductManifoldAttention(nn.Module):
       - Scores from product metric: s = -(λ_H d_H^2 + λ_E ||.||^2) / τ
       - Euclidean aggregation: weighted average
       - Hyperbolic aggregation: weighted Karcher mean (log/exp at current point)
-
-    Forward signature (as requested):
-        def forward(self,
-            curr_rho_batch,  # [B, A, de]
-            curr_hyp_emb,    # [B, dh]
-            demo_rho_batch,  # [B, N, L, A, de]
-            demo_hyp_emb     # [B, N, L, dh]
-        ) -> torch.Tensor:    # returns [B, A, z_dim]
     """
     def __init__(
         self,

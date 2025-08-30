@@ -8,7 +8,7 @@ from torch_geometric.data import HeteroData
 
 class Rho(nn.Module):
     """
-    ρ(G_l): Heterogeneous local-graph encoder for agent/scene graphs built with HeteroData.
+    rho(G_l): Heterogeneous local-graph encoder for agent/scene graphs built with HeteroData.
 
     - Node types:   'agent', 'scene'
     - Edge types:   ('agent','to','scene'), ('scene','to','agent') [+ optional ('agent','to','agent')]
@@ -56,14 +56,14 @@ class Rho(nn.Module):
                 beta=False  # set True if you want residual attention bias
             )
             # scene -> agent
-            convs[('scene','to','agent')] = TransformerConv(
-                in_channels=(hidden_dim, hidden_dim),
-                out_channels=hidden_dim // heads,
-                heads=heads,
-                edge_dim=edge_dim,
-                dropout=dropout,
-                beta=False
-            )
+            # convs[('scene','to','agent')] = TransformerConv(
+            #     in_channels=(hidden_dim, hidden_dim),
+            #     out_channels=hidden_dim // heads,
+            #     heads=heads,
+            #     edge_dim=edge_dim,
+            #     dropout=dropout,
+            #     beta=False
+            # )
             # optional agent -> agent scaffold
             if use_agent_agent:
                 convs[('agent','to','agent')] = TransformerConv(
