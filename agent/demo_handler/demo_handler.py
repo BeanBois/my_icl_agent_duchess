@@ -36,15 +36,8 @@ def poincare_dist(x, y, c, eps=1e-9):
     norm = torch.norm(diff, dim=-1).clamp_min(eps)
     return (2.0 / torch.sqrt(c)) * artanh(torch.sqrt(c) * norm)
 
-# ---------- Tree builder via temporal clustering ----------
-def _ang_diff(a: float, b: float) -> float:
-    # shortest signed difference on the circle
-    return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
 
-import torch
-from typing import List, Tuple
-
-# ---------- angle utilities ----------
+# ---------- tree utilities ----------
 def _cluster(
         cluster_idxs,
         theta,
