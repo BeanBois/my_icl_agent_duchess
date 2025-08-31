@@ -435,6 +435,7 @@ class TrainConfig:
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
+    num_chosen_pc = 512
 
     # flags
     train_geo_encoder = False
@@ -455,7 +456,7 @@ if __name__ == "__main__":
     
 
     # --- Data
-    ds = PseudoDemoDataset(B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = 256)
+    ds = PseudoDemoDataset(B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = cfg.num_chosen_pc)
     dl = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, collate_fn=collate_items, num_workers=0)
 
     # --- Model

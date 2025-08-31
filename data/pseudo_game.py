@@ -744,7 +744,7 @@ class PseudoGame:
         # 1. Local disturbances for 30% of trajectories
         if self.augmented:
             augmented_waypoints = self._add_local_disturbances(augmented_waypoints)
-            augmented_waypoints = self._add_state_changes(augmented_waypoints, change_probability=0.1)
+        augmented_waypoints = self._add_state_changes(augmented_waypoints, change_probability=0.1)
         
         return augmented_waypoints
 
