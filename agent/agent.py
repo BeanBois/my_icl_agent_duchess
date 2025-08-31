@@ -100,9 +100,11 @@ class Agent(nn.Module):
                  (-14.747874310824908, -13.509263611023021), 
                  (0, 0)], device=device, dtype=actions.dtype
             )  # [A,2]
+            A = kp.shape[0s]
         else:
             kp = keypoints.to(device=device, dtype=actions.dtype)  # [A,2]
             A = kp.shape[0]
+        kp = keypoints.view(1, 1, A, 2).expand(B, T, A, 2)  # [B,T,A,2] 
 
         # --- iterative refinement ------------------------------------------------
         for _ in range(K):
@@ -122,7 +124,7 @@ class Agent(nn.Module):
             # 2) Build current (noisy) node positions under actions
             Rn = self._rot2d(actions[..., 2])         # [B,T,2,2]
             tn = actions[..., 0:2]                    # [B,T,2]
-            Pn = torch.einsum("btij,aj->btai", Rn, kp) + tn.unsqueeze(-2)  # [B,T,A,2]
+            Pn = torch.einsum("btij,btaj->btai", Rn, kp) + tn.unsqueeze(-2)  # [B,T,A,2]
 
             # 3) Predicted clean node positions = current + predicted residuals
             #    also add the (shared) translation residual mean for stability

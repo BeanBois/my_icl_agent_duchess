@@ -320,8 +320,6 @@ class PerNodeDenoisingMSELoss(nn.Module):
 
     @staticmethod
     def _default_keypoints(device, dtype):
-        # 6 simple, centred keypoints (units arbitrary; you can swap for your real gripper KP set).
-        # A small star/hex pattern gives some spread so rotation is observable.
         kp = [PseudoDemoDataset.agent_kp[k] for k in PseudoDemoDataset.kp_order]
         pts = torch.tensor([kp], device=device, dtype=dtype)
         return pts  # [A,2]

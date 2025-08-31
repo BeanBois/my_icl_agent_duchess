@@ -13,7 +13,7 @@ from .pma import ProductManifoldAttention
 from .action_head import SimpleActionHead
 
 
-from .alignment import EuclidToHypAlign, TangentCrossAttn
+from .alignment import EuclidToHypAlign
 
 class Policy(nn.Module):
 
@@ -52,11 +52,11 @@ class Policy(nn.Module):
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
-        self.hyp_context = EuclidToHypAlign(
+        self.hyp_emb = EuclidToHypAlign(
             d_e = self.euc_dim, d_h = self.hyp_dim, heads = num_att_heads, 
             c = self.curvature, temperature=tau
         )
-        self.hyp_fuse = TangentCrossAttn(D=self.hyp_dim, heads=num_att_heads, c=self.curvature, align=True)
+        # self.hyp_fuse = TangentCrossAttn(D=self.hyp_dim, heads=num_att_heads, c=self.curvature, align=True)
 
         self.context_alignment = ProductManifoldAttention(
             de = self.euc_dim,
@@ -152,7 +152,7 @@ class Policy(nn.Module):
         curr_rho_batch = curr_node_emb['agent'].view(B,num_agent_nodes,-1)     # [B, A, De]
 
         ### then get curr hyp emb with rho(g) alignment 
-        curr_hyp_emb, _  = self.hyp_context(curr_rho_batch, demo_rho_batch, demo_hyp_all)
+        curr_hyp_emb, _  = self.hyp_emb(curr_rho_batch, demo_rho_batch, demo_hyp_all)
         
         ############################ Then Context Align demos & curr obs (phi) ############################ 
         curr_latent_var = self.context_alignment(
@@ -195,7 +195,7 @@ class Policy(nn.Module):
         pred_rho_batch = pred_node_emb['agent'].view(B,T, num_agent_nodes,-1) # [B, T, A, de] 
         flat_pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1) # [B*T, num_agent_nodes, self.euc_dim]
         
-        flat_pred_hyp_emb, _  = self.hyp_context(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
+        flat_pred_hyp_emb, _  = self.hyp_emb(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
         pred_hyp_emb = flat_pred_hyp_emb.view(B,T,-1) 
         # then context allign 
 
