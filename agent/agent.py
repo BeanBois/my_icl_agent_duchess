@@ -60,9 +60,9 @@ class Agent(nn.Module):
             demo_object_pos, # [B x N x L x M x 2]
             noisy_actions # [B, T, 4]
         ) # [B, T, 4, 5]
-        denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
+        # denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
 
-        return denoising_directions, noisy_actions
+        return denoising_directions_normalised, noisy_actions
 
     @torch.no_grad()
     def plan_actions(

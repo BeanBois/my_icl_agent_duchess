@@ -313,9 +313,10 @@ class PerNodeDenoisingMSELoss(nn.Module):
     loss : scalar tensor (mean MSE over B*T*A*5)
     """
 
-    def __init__(self, reduction: str = "mean"):
+    def __init__(self, pos_scale, reduction: str = "mean"):
         super().__init__()
         self.reduction = reduction
+        self.pos_scale = pos_scale
         self.mse = nn.MSELoss(reduction="mean")  # we average at the very end
 
     @staticmethod
@@ -393,11 +394,13 @@ class PerNodeDenoisingMSELoss(nn.Module):
         ds_exp = ds.unsqueeze(-1).unsqueeze(-1).expand(B, T, A, 1)              # [B,T,A,1]
 
         eps_gt = torch.cat([dt, dr, ds_exp], dim=-1)  # [B,T,A,5]
+        eps_gt_norm = eps_gt.clone()
+        eps_gt_norm[..., 0:4] = eps_gt_norm[..., 0:4] / self.pos_scale
 
         # --- MSE -------------------------------------------------------------
         # NOTE: The paper normalises components to [-1,1] during training to balance magnitudes.
         # If you already normalise actions/flow elsewhere, plain MSE here is correct (ε-targets vs ε-preds) :contentReference[oaicite:3]{index=3}.
-        loss = self.mse(pred_eps, eps_gt)
+        loss = self.mse(pred_eps, eps_gt_norm)
 
         return loss
 
@@ -476,7 +479,7 @@ if __name__ == "__main__":
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
     # --- Losses
-    pnn_loss = PerNodeDenoisingMSELoss()
+    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation)
 
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],
@@ -511,7 +514,7 @@ if __name__ == "__main__":
 
             with torch.amp.autocast(cfg.device, enabled=use_amp):
 
-                pred_pn_denoising_dir, noisy_actions = agent(
+                pred_pn_denoising_dir_normalised, noisy_actions = agent(
                     curr_agent_info,
                     curr_object_pos,
                     demo_agent_info,
@@ -523,7 +526,7 @@ if __name__ == "__main__":
                 loss = pnn_loss(
                     clean_actions,
                     noisy_actions, 
-                    pred_pn_denoising_dir
+                    pred_pn_denoising_dir_normalised
                 )
 
             scaler.scale(loss).backward()
