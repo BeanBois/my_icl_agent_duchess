@@ -200,3 +200,4 @@ class IntraActionSelfAttn(nn.Module):
         y = self.ffn_ln(x)
         y = x + self.ffn(y)               # FFN + residual
         return y
+

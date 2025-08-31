@@ -3,6 +3,38 @@ from torch import Tensor
 from typing import List, Tuple
 import math
 
+# SE2 Helpers
+def _wrap_to_pi(theta: Tensor) -> Tensor:
+    pi = math.pi
+    return (theta + pi) % (2 * pi) - pi
+
+def _taylor_A(w: Tensor) -> Tensor:  # sin w / w
+    w2 = w * w
+    return torch.where(w.abs() < 1e-4, 1 - w2/6 + w2*w2/120, torch.sin(w) / w)
+
+def _taylor_B(w: Tensor) -> Tensor:  # (1 - cos w) / w
+    w2 = w * w
+    return torch.where(w.abs() < 1e-4, 0.5 - w2/24 + w2*w2/720, (1 - torch.cos(w)) / w)
+
+def se2_exp(y: Tensor) -> Tensor:
+    """ y=[vx,vy,w] -> [dx,dy,theta] """
+    vx, vy, w = y.unbind(dim=-1)
+    A, B = _taylor_A(w), _taylor_B(w)
+    tx = A * vx - B * vy
+    ty = B * vx + A * vy
+    theta = _wrap_to_pi(w)
+    return torch.stack([tx, ty, theta], dim=-1)
+
+def se2_log(a: Tensor) -> Tensor:
+    """ a=[dx,dy,theta] -> [vx,vy,w] """
+    dx, dy, w = a.unbind(dim=-1)
+    A, B = _taylor_A(w), _taylor_B(w)
+    denom = A*A + B*B
+    invA, invB = A/denom, B/denom
+    vx =  invA * dx + invB * dy
+    vy = -invB * dx + invA * dy
+    return torch.stack([vx, vy, _wrap_to_pi(w)], dim=-1)
+
 # graph aux
 def fourier_embed_2d(delta: Tensor, num_freqs: int = 10) -> Tensor:
     """Δ=(dx,dy) -> [sin/cos at powers-of-2 frequencies] with shape [E, 4*num_freqs]."""
