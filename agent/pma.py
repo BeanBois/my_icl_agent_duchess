@@ -137,7 +137,7 @@ class ProductManifoldAttention(nn.Module):
         B, N, L, A, de = demo_rho_batch.shape
         M = N * L
         demo_rho_flat = demo_rho_batch.view(B, M, A, de)
-        demo_hyp_flat = demo_hyp_emb.view(B, M, -1)  # dh
+        demo_hyp_flat = demo_hyp_emb.reshape(B, M, -1)  # dh
         return demo_rho_flat, demo_hyp_flat  # [B,M,A,de], [B,M,dh]
 
     def forward(self,
@@ -149,7 +149,6 @@ class ProductManifoldAttention(nn.Module):
         device = curr_rho_batch.device
         B, A, de = curr_rho_batch.shape
         _, dh = curr_hyp_emb.shape
-
         demo_rho_flat, demo_hyp_flat = self._flatten_demos(demo_rho_batch, demo_hyp_emb)
         # Shapes:
         #   demo_rho_flat: [B, M, A, de]

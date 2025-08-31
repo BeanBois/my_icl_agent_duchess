@@ -163,8 +163,8 @@ class Policy(nn.Module):
         # we build SK tree by concatinating curr_agent_pos | pred_agent_pos | deo_agent_pos along L dimension, eseentially treating
         # curr_obs and pred_actions as starting states. This is motivated by the FINE-TO-COARSE IL, which has the idea of just repeating
         # the demonstration after finding a point where the demonstration starts
-        _curr_agent_info_temp = curr_object_pos.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
-        _pred_agent_info_temp = pred_agent_info.view(B,1,1,num_agent_nodes,agent_dim).repeat(1,N,1,1,1)
+        _curr_agent_info_temp = curr_agent_info.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
+        _pred_agent_info_temp = pred_agent_info.view(B,1,T,num_agent_nodes,agent_dim).repeat(1,N,1,1,1)
         _final_data = torch.concat([_curr_agent_info_temp, _pred_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+1,A,6)
         hyperbolic_embeddings = self.demo_handler(_final_data)
 
@@ -202,7 +202,7 @@ class Policy(nn.Module):
         final_embd = self.intra_action(pred_embd) # let agent nodes within each timestep 'coordinate; amongst themselves
 
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
-
+        
         return denoising_direction
 
     def _pool_agents_to_batch(self, u_agents: torch.Tensor, rho_g: torch.Tensor) -> torch.Tensor:
