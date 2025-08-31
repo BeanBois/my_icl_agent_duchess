@@ -186,9 +186,13 @@ class IntraActionSelfAttn(nn.Module):
         v = self.v(x).view(B, T, A, self.h, self.hd)
 
         # scores: [B, T, h, A, A]
-        scores = torch.einsum('btahd,btbhd->bthab', q, k) / math.sqrt(self.hd)
-        attn = scores.softmax(dim=-1)
-        out_h = torch.einsum('bthab,btbhd->btahd', attn, v)  # [B, T, A, h, hd]
+        scores = torch.einsum('btahd,btjhd->bthaj', q, k) / math.sqrt(self.hd)
+
+        # attention over keys (last dim = j)
+        attn = scores.softmax(dim=-1)  # [B, T, h, A, A]
+
+        # out_h: [B, T, A, h, hd]
+        out_h = torch.einsum('bthaj,btjhd->btahd', attn, v)
         out = self.o(out_h.reshape(B, T, A, Z))
         out = self.drop(out)
 

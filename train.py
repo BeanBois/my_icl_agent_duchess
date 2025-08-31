@@ -413,7 +413,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 7000
+    max_steps: int = 2000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -427,19 +427,19 @@ class TrainConfig:
     lookahead: int = 1      # next-search step size
     num_sampled_pc = 8
     num_att_heads = 4
-    euc_head_dim = 8
+    euc_head_dim = 64
     hyp_dim = 2
     in_dim_agent = 9
     tau=0.5
     pred_horizon = 5
     demo_length = 20
-    max_translation = 50
+    max_translation = 200
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
 
 
 if __name__ == "__main__":
@@ -512,7 +512,7 @@ if __name__ == "__main__":
 
             with torch.amp.autocast(cfg.device, enabled=use_amp):
 
-                pred_pn_denoising_dir, noisy_actions = agent.forward(
+                pred_pn_denoising_dir, noisy_actions = agent(
                     curr_agent_info,
                     curr_object_pos,
                     demo_agent_info,

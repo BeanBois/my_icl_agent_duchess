@@ -311,7 +311,7 @@ if __name__ == "__main__":
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
     agent_state_dict = torch.load('agent.pth', map_location="cpu")
     agent.load_state_dict(agent_state_dict['model'])
-
+    agent.eval()
     print('Start evaluating')
     num_rollouts = 10
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
@@ -319,12 +319,11 @@ if __name__ == "__main__":
     wins = 0
     objective = GameObjective.REACH_GOAL
     for _ in range(num_rollouts):
-        # breakpoint()
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,
             objective=objective
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=50))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=50, refine =3))
     print(f'Won {wins} / {num_rollouts} for {objective}')
     
 

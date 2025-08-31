@@ -10,9 +10,11 @@ from .my_local_graph import build_local_heterodata_batch
 from .rho import Rho 
 from .foresight import IntraActionSelfAttn, PsiForesight
 from .pma import ProductManifoldAttention
-from .refiner import CurrentHypTokenRefiner
-from .action_head import ProductManifoldGPHead, SimpleActionHead
+from .action_head import SimpleActionHead
 
+
+from .refiner import CurrentHypTokenRefinerPA
+from .alignment import EuclidToHypAlign
 
 class Policy(nn.Module):
 
@@ -51,9 +53,14 @@ class Policy(nn.Module):
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
-        self.hyp_context = CurrentHypTokenRefiner(
-            Dh=2, Dg=self.euc_dim, K=2, c = self.curvature
+        self.hyp_context = CurrentHypTokenRefinerPA(
+            Dh=self.hyp_dim, de=self.euc_dim, K=2, c = self.curvature
         )
+        self.agent_pool_q = nn.Linear(self.euc_dim, 1, bias=False)
+        # self.hyp_context = EuclidToHypAlign(
+        #     d_e = self.euc_dim, d_h = self.hyp_dim, heads = num_att_heads, 
+        #     c = self.curvature, temperature=tau
+        # )
         self.context_alignment = ProductManifoldAttention(
             de = self.euc_dim,
             dh = self.hyp_dim,
@@ -69,14 +76,14 @@ class Policy(nn.Module):
             n_heads = num_att_heads,
             dropout=0.1
         )
-        self.intra_action = IntraActionSelfAttn(z_dim=self.z_dim, n_heads=8, ff_mult=4, dropout=0.0)
+        self.intra_action = IntraActionSelfAttn(z_dim=self.z_dim, n_heads=4, ff_mult=4, dropout=0.0)
 
         self.action_head = SimpleActionHead(
             in_dim=self.z_dim,
             hidden_dim=self.z_dim // 2
         )
 
-        # self.curr_hyp_emb = nn.Parameter(torch.randn(self.hyp_dim))
+        self.curr_hyp_emb = nn.Parameter(torch.randn(self.hyp_dim))
               
     def forward(self,
                 curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
@@ -145,16 +152,24 @@ class Policy(nn.Module):
         ### get rho 
         curr_node_emb, _ = self.rho(curr_local_graph_batch)
         ##### indv emb 
-        curr_rho_batch = curr_node_emb['agent']     # [B, A, De]
+        curr_rho_batch = curr_node_emb['agent'].view(B,num_agent_nodes,-1)     # [B, A, De]
 
-        ### impromptu shape fixes 
-        if len(curr_rho_batch.shape) == 2:
-            temp = curr_rho_batch.shape
-            curr_rho_batch = curr_rho_batch.view(1,*temp)
+
 
         ### then get curr hyp emb
+        ## choose 1 of 3. 
+
+        ### 1 : learnt params
         # curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
-        curr_hyp_emb = self.hyp_context(demo_hyp_all, curr_rho_batch)
+
+        ### 2: seed from rho(g) and demo_hyp
+        u_agents_now = self.hyp_context(demo_hyp_all, curr_rho_batch, mask=None)   # (B, A, Dh)
+        curr_hyp_emb = self._pool_agents_to_batch(u_agents_now, curr_rho_batch) 
+
+        # 3 : rho(g) alignment (not that good)
+        # curr_hyp_emb, _  = self.hyp_context(curr_rho_batch, demo_rho_batch, demo_hyp_all)
+        
+        ### 
         ############################ Then Context Align demos & curr obs (phi) ############################ 
         curr_latent_var = self.context_alignment(
             curr_rho_batch,
@@ -193,18 +208,31 @@ class Policy(nn.Module):
 
         ### get pred rho and hyp emb
         pred_node_emb, _ = self.rho(flat_pred_local_graphs)
-        flat_pred_rho_batch = pred_node_emb['agent'] # [B*T, num_agent_nodes, self.euc_dim]
-        pred_rho_batch = flat_pred_rho_batch.view(B,T, num_agent_nodes,-1) # [B, T, A, de]
-        # pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
-        pred_hyp_emb = self.hyp_context(demo_hyp_all, flat_pred_rho_batch).view(B,T,-1)
+        pred_rho_batch = pred_node_emb['agent'].view(B,T, num_agent_nodes,-1) # [B, T, A, de] 
+        flat_pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1) # [B*T, num_agent_nodes, self.euc_dim]
         
+        ## choose 1 of 3. like above 
+
+        # 1 learnt param 
+        # pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
+        
+        # 2 seed: vectorize over T: merge (B,T) -> BT
+        rho_bt   = pred_rho_batch.reshape(B*T, num_agent_nodes, -1)              # (BT, A, de)
+        demo_bt  = demo_hyp_all.repeat_interleave(T, dim=0)                       # (BT, N, L, Dh)
+        u_agents_seq = self.hyp_context(demo_bt, rho_bt, mask=None)               # (BT, A, Dh)
+        flat_pred_hyp_emb = self._pool_agents_to_batch(u_agents_seq, rho_bt)                  # (BT, Dh)  
+            
+        # 3 align
+        # flat_pred_hyp_emb, _  = self.hyp_context(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
+        # pred_hyp_emb = flat_pred_hyp_emb.view(B,T,-1) 
+        
+        ####
+
         # then context allign 
-        _pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1)
-        _flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
 
         flat_pred_latent_variables = self.context_alignment(
-            _pred_rho_batch, # [B*T, A, de ]
-            _flat_pred_hyp_emb, # [B*T, dh]
+            flat_pred_rho_batch, # [B*T, A, de ]
+            flat_pred_hyp_emb, # [B*T, dh]
             demo_rho_batch,
             demo_hyp_all,
         ) # [B*T, A, z_dim]
@@ -220,13 +248,26 @@ class Policy(nn.Module):
             pred_latent_variables,
             actions,
         ) # [B, T, A, z_dim] propagate info from curr latent var to pred latent var like in IP 
-
         final_embd = self.intra_action(pred_embd) # let agent nodes within each timestep 'coordinate; amongst themselves
 
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
 
         return denoising_direction
 
+    def _pool_agents_to_batch(self, u_agents: torch.Tensor, rho_g: torch.Tensor) -> torch.Tensor:
+        """
+        u_agents: (B, A, Dh) in Poincaré ball
+        rho_g:    (B, A, de) Euclidean features (weights)
+        returns:  (B, Dh)    pooled token in the ball
+        """
+        # weights from rho(G)
+        w = torch.softmax(self.agent_pool_q(rho_g).squeeze(-1), dim=1)   # (B, A)
+
+        # pool in tangent for stability
+        u_tan = logmap0(u_agents, self.curvature)                        # (B, A, Dh)
+        pooled_tan = torch.einsum('ba,bad->bd', w, u_tan)                # (B, Dh)
+        u_batch = expmap0(pooled_tan, self.curvature)                    # (B, Dh)
+        return u_batch
 
     def _perform_reverse_action(self,
                                 actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
