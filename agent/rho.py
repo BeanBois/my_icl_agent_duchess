@@ -4,8 +4,6 @@ from torch_geometric.nn import HeteroConv, TransformerConv, global_mean_pool
 from torch_geometric.data import HeteroData
 
 
-
-
 class Rho(nn.Module):
     """
     rho(G_l): Heterogeneous local-graph encoder for agent/scene graphs built with HeteroData.

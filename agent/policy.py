@@ -13,8 +13,7 @@ from .pma import ProductManifoldAttention
 from .action_head import SimpleActionHead
 
 
-from .refiner import CurrentHypTokenRefinerPA
-from .alignment import EuclidToHypAlign
+from .alignment import EuclidToHypAlign, TangentCrossAttn
 
 class Policy(nn.Module):
 
@@ -53,14 +52,12 @@ class Policy(nn.Module):
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
-        self.hyp_context = CurrentHypTokenRefinerPA(
-            Dh=self.hyp_dim, de=self.euc_dim, K=2, c = self.curvature
+        self.hyp_context = EuclidToHypAlign(
+            d_e = self.euc_dim, d_h = self.hyp_dim, heads = num_att_heads, 
+            c = self.curvature, temperature=tau
         )
-        self.agent_pool_q = nn.Linear(self.euc_dim, 1, bias=False)
-        # self.hyp_context = EuclidToHypAlign(
-        #     d_e = self.euc_dim, d_h = self.hyp_dim, heads = num_att_heads, 
-        #     c = self.curvature, temperature=tau
-        # )
+        self.hyp_fuse = TangentCrossAttn(D=self.hyp_dim, heads=num_att_heads, c=self.curvature, align=True)
+
         self.context_alignment = ProductManifoldAttention(
             de = self.euc_dim,
             dh = self.hyp_dim,
@@ -70,20 +67,20 @@ class Policy(nn.Module):
             dropout = 0.1,
             proj_hidden = 0, 
         )
+        
         self.foresight_adjustment = PsiForesight(
             z_dim=self.z_dim,
             edge_dim=self.z_dim,
             n_heads = num_att_heads,
             dropout=0.1
         )
+        
         self.intra_action = IntraActionSelfAttn(z_dim=self.z_dim, n_heads=4, ff_mult=4, dropout=0.0)
 
         self.action_head = SimpleActionHead(
             in_dim=self.z_dim,
             hidden_dim=self.z_dim // 2
         )
-
-        self.curr_hyp_emb = nn.Parameter(torch.randn(self.hyp_dim))
               
     def forward(self,
                 curr_agent_info, # [B x self.num_agent_nodes x 6] x, y, theta, state, time, done
@@ -154,22 +151,9 @@ class Policy(nn.Module):
         ##### indv emb 
         curr_rho_batch = curr_node_emb['agent'].view(B,num_agent_nodes,-1)     # [B, A, De]
 
-
-
-        ### then get curr hyp emb
-        ## choose 1 of 3. 
-
-        ### 1 : learnt params
-        curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
-
-        ### 2: seed from rho(g) and demo_hyp
-        # u_agents_now = self.hyp_context(demo_hyp_all, curr_rho_batch, mask=None)   # (B, A, Dh)
-        # curr_hyp_emb = self._pool_agents_to_batch(u_agents_now, curr_rho_batch) 
-
-        # 3 : rho(g) alignment (not that good)
-        # curr_hyp_emb, _  = self.hyp_context(curr_rho_batch, demo_rho_batch, demo_hyp_all)
+        ### then get curr hyp emb with rho(g) alignment 
+        curr_hyp_emb, _  = self.hyp_context(curr_rho_batch, demo_rho_batch, demo_hyp_all)
         
-        ### 
         ############################ Then Context Align demos & curr obs (phi) ############################ 
         curr_latent_var = self.context_alignment(
             curr_rho_batch,
@@ -211,24 +195,8 @@ class Policy(nn.Module):
         pred_rho_batch = pred_node_emb['agent'].view(B,T, num_agent_nodes,-1) # [B, T, A, de] 
         flat_pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1) # [B*T, num_agent_nodes, self.euc_dim]
         
-        ## choose 1 of 3. like above 
-
-        # 1 learnt param 
-        pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
-        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
-
-        # 2 seed: vectorize over T: merge (B,T) -> BT
-        # rho_bt   = pred_rho_batch.reshape(B*T, num_agent_nodes, -1)              # (BT, A, de)
-        # demo_bt  = demo_hyp_all.repeat_interleave(T, dim=0)                       # (BT, N, L, Dh)
-        # u_agents_seq = self.hyp_context(demo_bt, rho_bt, mask=None)               # (BT, A, Dh)
-        # flat_pred_hyp_emb = self._pool_agents_to_batch(u_agents_seq, rho_bt)                  # (BT, Dh)  
-            
-        # 3 align
-        # flat_pred_hyp_emb, _  = self.hyp_context(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
-        # pred_hyp_emb = flat_pred_hyp_emb.view(B,T,-1) 
-        
-        ####
-
+        flat_pred_hyp_emb, _  = self.hyp_context(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
+        pred_hyp_emb = flat_pred_hyp_emb.view(B,T,-1) 
         # then context allign 
 
         flat_pred_latent_variables = self.context_alignment(

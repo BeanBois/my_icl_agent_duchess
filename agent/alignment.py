@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import math 
 from utilities import expmap0, logmap0, _sqrt_c  # and your barycenter helpers if any
 
 class EuclidToHypAlign(nn.Module):
@@ -137,3 +137,60 @@ class EuclidToHypAlign(nn.Module):
         curr_hyp = torch.mean(curr_hyp, dim=1)
 
         return curr_hyp, attn
+
+
+class TangentCrossAttn(nn.Module):
+    """
+    Cross-attention done in the tangent space at 0.
+    Inputs are ALREADY in tangent space.
+    Shapes:
+      q_tan: [B, A, D]   (current)
+      k_tan: [B, M, D]   (demos flattened)
+      v_tan: [B, M, D]
+    Returns:
+      y_ball: [B, A, D]  (mapped back to Poincaré via expmap0)
+    """
+    def __init__(self, D, heads=4, c=1.0, align=True):
+        super().__init__()
+        assert D % heads == 0, "D must be divisible by heads"
+        self.D = D
+        self.H = heads
+        self.dk = D // heads
+        self.c = c
+
+        self.Wq = nn.Linear(D, D, bias=False)
+        self.Wk = nn.Linear(D, D, bias=False)
+        self.Wv = nn.Linear(D, D, bias=False)
+        self.Wo = nn.Linear(D, D, bias=False)
+
+        self.align = align
+        if align:
+            # tiny per-head align in tangent (shared across heads after reshape)
+            self.A = nn.Linear(self.dk, self.dk, bias=False)
+
+    def _split_heads(self, x):  # [B,N,D] -> [B,H,N,dk]
+        B, N, D = x.shape
+        x = x.view(B, N, self.H, self.dk).transpose(1, 2)
+        return x
+
+    def _merge_heads(self, x):  # [B,H,N,dk] -> [B,N,D]
+        B, H, N, dk = x.shape
+        return x.transpose(1, 2).contiguous().view(B, N, H * dk)
+
+    def forward(self, q_tan, k_tan, v_tan):
+        # Linear proj in tangent
+        q = self._split_heads(self.Wq(q_tan))  # [B,H,A,dk]
+        k = self._split_heads(self.Wk(k_tan))  # [B,H,M,dk]
+        v = self._split_heads(self.Wv(v_tan))  # [B,H,M,dk]
+
+        if self.align:
+            q = self.A(q)  # tiny alignment (per-head)
+
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dk)  # [B,H,A,M]
+        attn = scores.softmax(dim=-1)
+        y_tan = torch.matmul(attn, v)  # [B,H,A,dk]
+        y_tan = self._merge_heads(y_tan)  # [B,A,D]
+
+        y_tan = self.Wo(y_tan)          # still tangent
+        y_ball = expmap0(y_tan, self.c) # back to ball
+        return y_ball
