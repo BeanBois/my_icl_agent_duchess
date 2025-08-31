@@ -11,8 +11,6 @@ from .rho import Rho
 from .foresight import IntraActionSelfAttn, PsiForesight
 from .pma import ProductManifoldAttention
 from .action_head import SimpleActionHead
-
-
 from .alignment import EuclidToHypAlign
 
 class Policy(nn.Module):
@@ -52,12 +50,6 @@ class Policy(nn.Module):
             curvature=self.curvature,
             angular_granularities_deg=self.angular_granulities,
         )
-        self.hyp_emb = EuclidToHypAlign(
-            d_e = self.euc_dim, d_h = self.hyp_dim, heads = num_att_heads, 
-            c = self.curvature, temperature=tau
-        )
-        # self.hyp_fuse = TangentCrossAttn(D=self.hyp_dim, heads=num_att_heads, c=self.curvature, align=True)
-
         self.context_alignment = ProductManifoldAttention(
             de = self.euc_dim,
             dh = self.hyp_dim,
@@ -67,16 +59,13 @@ class Policy(nn.Module):
             dropout = 0.1,
             proj_hidden = 0, 
         )
-        
         self.foresight_adjustment = PsiForesight(
             z_dim=self.z_dim,
             edge_dim=self.z_dim,
             n_heads = num_att_heads,
             dropout=0.1
         )
-        
         self.intra_action = IntraActionSelfAttn(z_dim=self.z_dim, n_heads=4, ff_mult=4, dropout=0.0)
-
         self.action_head = SimpleActionHead(
             in_dim=self.z_dim,
             hidden_dim=self.z_dim // 2
@@ -92,17 +81,12 @@ class Policy(nn.Module):
         B, N, L, num_agent_nodes, agent_dim = demo_agent_info.shape
         _, _, _, num_object_nodes, obj_pos_dim = demo_object_pos.shape 
 
-        ############################ First process demos into hyperbolic embeddings ############################
-        demo_hyp_all = self.demo_handler(demo_agent_info)
-        B_, N_, L_, dh = demo_hyp_all.shape
-        assert (B_, N_, L_,) == (B, N, L), "SK shape mismatch."
-
-        ### then process demo Euclidean embeddings 
-        ### then get rho(G) for each demo
+        ############################ First process euclidean embeddings ############################
+        # get rho(G) for each demo
         flat_demo_agent_info = demo_agent_info.view(B * N * L, num_agent_nodes, agent_dim)
         flat_demo_object_pos = demo_object_pos.view(B * N * L, num_object_nodes, obj_pos_dim)
         
-        ### first embed obj in demos
+        ### first build local hetero graph
         F_list, C_list = [], []
         for i in range(B*N*L):
             # one cloud Pi: [M_raw, 2]  (use your raw per-frame points here)
@@ -112,7 +96,6 @@ class Policy(nn.Module):
             C_list.append(Ci)
         flat_demo_scene_feats_batch = torch.stack(F_list, dim=0)  # [B*N*L, M, D]
         flat_demo_scene_pos_batch   = torch.stack(C_list, dim=0)  # [B*N*L, M, 2]
-
         flat_demo_local_graphs = build_local_heterodata_batch(
             agent_pos_b = flat_demo_agent_info,
             scene_pos_b=flat_demo_scene_pos_batch,
@@ -121,23 +104,20 @@ class Policy(nn.Module):
             include_agent_agent=False # no agent-agent edges 
         ) # returns HeteroBatch[B*N*L]
 
-        ### get rho(G) for demos 
+        ### then get rho(demo)
         demo_node_emb, _ = self.rho(flat_demo_local_graphs)
         ##### indv emb
         flat_demo_rho_batch = demo_node_emb['agent']                  # [B*N*L, A, euc_emb]        
         demo_rho_batch = flat_demo_rho_batch.view(B, N, L, num_agent_nodes, -1)    # [B,N,L,A,euc_emb]
 
-
-        ############################ Now for current observation ###################################
-        ### first get obj embeddings 
+        # then get rho(G) for current observation 
+        ### first build local hetero graph 
         F_list, C_list = [], []
         for i in range(B):
             Fi, Ci = self.geometric_encoder(curr_object_pos[i])  # [M,D], [M,2]
             F_list.append(Fi); C_list.append(Ci)
         curr_scene_feats = torch.stack(F_list, dim=0)  # [B, M, D]
         curr_scene_pos   = torch.stack(C_list, dim=0)  # [B, M, 2]
-
-        ### build local graph
         curr_local_graph_batch = build_local_heterodata_batch(
             agent_pos_b = curr_agent_info,      # [B, A, 6]
             scene_pos_b = curr_scene_pos,       # [B, M, 2]
@@ -145,28 +125,13 @@ class Policy(nn.Module):
             num_freqs = self.euc_dim //4,
             include_agent_agent=False
         )
-
-        ### get rho 
+        ### get rho(current)
         curr_node_emb, _ = self.rho(curr_local_graph_batch)
-        ##### indv emb 
         curr_rho_batch = curr_node_emb['agent'].view(B,num_agent_nodes,-1)     # [B, A, De]
 
-        ### then get curr hyp emb with rho(g) alignment 
-        curr_hyp_emb, _  = self.hyp_emb(curr_rho_batch, demo_rho_batch, demo_hyp_all)
-        
-        ############################ Then Context Align demos & curr obs (phi) ############################ 
-        curr_latent_var = self.context_alignment(
-            curr_rho_batch,
-            curr_hyp_emb,
-            demo_rho_batch,
-            demo_hyp_all
-        ) # [B, A, z_dim]
-       
-        # change from here... 
-        ############################ Then Actions ############################ 
+        # finally for actions 
         pred_obj_info, pred_agent_info = self._perform_reverse_action(actions, curr_object_pos, curr_agent_info)
         
-
         # with pred info flatten, then make hetero graph 
         B,T,M, _ = pred_obj_info.shape  # T = self.pred_horizon
         flat_pred_obs_info = pred_obj_info.view(B*T, M, -1)
@@ -180,8 +145,6 @@ class Policy(nn.Module):
             C_list.append(Ci)
         flat_pred_feats_batch = torch.stack(F_list, dim=0)  # [B*N*L, M, D]
         flat_pred_scene_pos_batch   = torch.stack(C_list, dim=0)  # [B*N*L, M, 2]
-
-
         flat_pred_local_graphs = build_local_heterodata_batch(
             agent_pos_b = flat_pred_agent_info,
             scene_pos_b = flat_pred_scene_pos_batch,
@@ -190,23 +153,42 @@ class Policy(nn.Module):
             include_agent_agent=False 
         )
 
-        ### get pred rho and hyp emb
+        ### get pred rho 
         pred_node_emb, _ = self.rho(flat_pred_local_graphs)
         pred_rho_batch = pred_node_emb['agent'].view(B,T, num_agent_nodes,-1) # [B, T, A, de] 
         flat_pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1) # [B*T, num_agent_nodes, self.euc_dim]
-        
-        flat_pred_hyp_emb, _  = self.hyp_emb(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
-        pred_hyp_emb = flat_pred_hyp_emb.view(B,T,-1) 
-        # then context allign 
+        ############################ Now for hyperbolic embeddings ###################################
 
+        # now we have curr_agent_pos [B, A, agent_dim], pred_agent_pos [B,T,A,agent_dim] and demo_agent_pos [B,N,L,A,agent_dim]
+        # we build SK tree by concatinating curr_agent_pos | pred_agent_pos | deo_agent_pos along L dimension, eseentially treating
+        # curr_obs and pred_actions as starting states. This is motivated by the FINE-TO-COARSE IL, which has the idea of just repeating
+        # the demonstration after finding a point where the demonstration starts
+        _curr_agent_info_temp = curr_object_pos.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
+        _pred_agent_info_temp = pred_agent_info.view(B,1,1,num_agent_nodes,agent_dim).repeat(1,N,1,1,1)
+        _final_data = torch.concat([_curr_agent_info_temp, _pred_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+1,A,6)
+        hyperbolic_embeddings = self.demo_handler(_final_data)
+
+        curr_hyp_emb = hyperbolic_embeddings[:,0,0,:].view(B,-1) # choose form first demo they will be the same 
+        pred_hyp_emb = hyperbolic_embeddings[:,0,1:self.pred_horizon+1,:].view(B,T, -1) # choose form first demo they will be the same smentically
+        demo_hyp_all = hyperbolic_embeddings[:,:,self.pred_horizon+1:,:].view(B,N,L,-1)
+
+        ############################ Then 'project' to Product manifold space ############################ 
+        curr_latent_var = self.context_alignment(
+            curr_rho_batch,
+            curr_hyp_emb,
+            demo_rho_batch,
+            demo_hyp_all
+        ) # [B, A, z_dim]
+       
+        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
         flat_pred_latent_variables = self.context_alignment(
             flat_pred_rho_batch, # [B*T, A, de ]
             flat_pred_hyp_emb, # [B*T, dh]
             demo_rho_batch,
             demo_hyp_all,
         ) # [B*T, A, z_dim]
-
         pred_latent_variables = flat_pred_latent_variables.view(B,T,num_agent_nodes,-1) # [B,T, A, z_dim]
+        
         ############################ info Z_current => Z_predicted  ############################ 
         # like in IP 
         # Z_current <= curr_latent_var [B,A,z]
@@ -309,3 +291,16 @@ class Policy(nn.Module):
             pred_agent_info[:, t, :, 5] = gate
 
         return pred_object_pos, pred_agent_info
+
+
+"""
+   _temp = curr_object_pos.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
+
+        _data = torch.concat([_temp, demo_agent_info], dim=2) # concat along L dimension
+
+        hyperbolic_embeddings = self.demo_handler(_data) # (B, N, L ,dh)
+        curr_hyp_emb = hyperbolic_embeddings[:, :, 0,:]
+        demo_hyp_all = hyperbolic_embeddings[:,:,1:,:]
+        B_, N_, L_, dh = demo_hyp_all.shape
+        assert (B_, N_, L_,) == (B, N, L), "SK shape mismatch."
+"""

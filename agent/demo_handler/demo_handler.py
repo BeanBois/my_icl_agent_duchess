@@ -228,7 +228,7 @@ class DemoHandler(nn.Module):
     """
     def __init__(self,
                  curvature: float = 1.0,
-                 angular_granularities_deg: float = [60.0,45.0,30.0,15.0],
+                 angular_granularities_deg: float = [90.0,60.0,30.0],
                  base_cone_deg: float = 30.0,
                  min_edge_dist: float = 0.5):
         super().__init__()
