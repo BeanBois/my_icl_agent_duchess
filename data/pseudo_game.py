@@ -742,11 +742,9 @@ class PseudoGame:
         augmented_waypoints = waypoints_with_player_state.copy()
         
         # 1. Local disturbances for 30% of trajectories
-        if np.random.random() < 0.3:
+        if self.augmented:
             augmented_waypoints = self._add_local_disturbances(augmented_waypoints)
-        
-        # 2. State changes for 10% of data points
-        augmented_waypoints = self._add_state_changes(augmented_waypoints, change_probability=0.1)
+            augmented_waypoints = self._add_state_changes(augmented_waypoints, change_probability=0.1)
         
         return augmented_waypoints
 

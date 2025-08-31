@@ -62,8 +62,8 @@ def _cluster(
     clusters = []
     children = []
     for idx in cluster_idxs:
-        # if state[earliest_index] != state[idx] or \
-        if abs(math.radians(theta[earliest_index] - theta[idx])) > gran:
+        if state[earliest_index] != state[idx] or \
+         abs(math.radians(theta[earliest_index] - theta[idx])) > gran:
             clusters.append((earliest_index, children))
             earliest_index = idx
             children = []
