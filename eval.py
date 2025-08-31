@@ -263,7 +263,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
             curr_object_pos = curr_object_pos,
             demo_agent_info = demo_agent_info,
             demo_object_pos = demo_object_pos,
-            T = horizon,
+            # T = horizon,
             K = refine,
             keypoints = keypoints
         )  # [B,T,4]
@@ -317,7 +317,7 @@ if __name__ == "__main__":
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
     # for objective in GameObjective:
     wins = 0
-    objective = GameObjective.REACH_GOAL
+    objective = GameObjective.EAT_ALL
     for _ in range(num_rollouts):
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,

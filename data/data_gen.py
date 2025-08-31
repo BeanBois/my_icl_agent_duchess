@@ -159,15 +159,34 @@ class PseudoDemoGenerator:
         observations = self._downsample_obs(observations)
         curr_obs_set = []
         action_set = []
-        # now i want to map self.prediciton_horizon => 1 obs
-        for i in range(0, len(observations), self.pred_horizon):
-            curr_obs = observations[i]
-            curr_actions = actions[i:i + self.pred_horizon]  # Fix: start from i, take pred_horizon actions
-            if len(curr_actions) > 0:
-                curr_obs_set.append(curr_obs)
-                action_set.append(curr_actions)
 
-        # handle remainder
+        D = actions.shape[-1]
+        prev_latest_abs = None  # last absolute cumulative action from previous window
+
+        # step through ACTIONS in blocks of pred_horizon;
+        # pair obs[i] with actions[i : i+pred_horizon]
+        for i in range(0, len(actions), self.pred_horizon):
+            end = min(i + self.pred_horizon, len(actions))
+
+            curr_obs = observations[i]                        # 1 obs for this window
+            curr_actions_abs = actions[i:end]                 # absolute cumulative actions in this window
+
+            if curr_actions_abs.numel() == 0:
+                continue
+
+            if prev_latest_abs is None:
+                # first window: relative == absolute
+                curr_actions_rel = curr_actions_abs
+            else:
+                # subtract previous window's latest *absolute* action
+                curr_actions_rel = curr_actions_abs - prev_latest_abs.view(1, D)
+
+            # IMPORTANT: update prev_latest_abs from the ORIGINAL absolute tensor
+            prev_latest_abs = curr_actions_abs[-1].detach()
+
+            curr_obs_set.append(curr_obs)
+            action_set.append(curr_actions_rel)
+
         return curr_obs_set, action_set
 
     def _accumulate_actions(self, actions):
