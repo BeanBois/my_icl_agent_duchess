@@ -100,7 +100,7 @@ class Agent(nn.Module):
                  (-14.747874310824908, -13.509263611023021), 
                  (0, 0)], device=device, dtype=actions.dtype
             )  # [A,2]
-            A = kp.shape[0s]
+            A = kp.shape[0]
         else:
             kp = keypoints.to(device=device, dtype=actions.dtype)  # [A,2]
             A = kp.shape[0]
