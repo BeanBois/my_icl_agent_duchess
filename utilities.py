@@ -86,6 +86,7 @@ def time_posterior(attn_same, reduce_over_agents: bool = True):
 # graph aux
 def fourier_embed_2d(delta: Tensor, num_freqs: int = 10) -> Tensor:
     """Δ=(dx,dy) -> [sin/cos at powers-of-2 frequencies] with shape [E, 4*num_freqs]."""
+    delta = delta.to(torch.float32)
     freqs = (2.0 ** torch.arange(num_freqs, device=delta.device, dtype=delta.dtype)) * torch.pi
     ang = delta.unsqueeze(-1) * freqs  # [E,2,F]
     sin_x, cos_x = torch.sin(ang[:, 0, :]), torch.cos(ang[:, 0, :])

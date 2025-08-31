@@ -33,7 +33,7 @@ class Policy(nn.Module):
         self.curvature = curvature
         self.euc_dim = num_att_heads * euc_head_dim
         self.hyp_dim = 2
-        self.z_dim = 2 * self.hyp_dim + self.euc_dim
+        self.z_dim = num_att_heads * self.hyp_dim + self.euc_dim
         self.angular_granulities = angular_granulities
         
 
@@ -160,11 +160,11 @@ class Policy(nn.Module):
         ## choose 1 of 3. 
 
         ### 1 : learnt params
-        # curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
+        curr_hyp_emb = self.curr_hyp_emb.repeat(B,1) # [B,dh]
 
         ### 2: seed from rho(g) and demo_hyp
-        u_agents_now = self.hyp_context(demo_hyp_all, curr_rho_batch, mask=None)   # (B, A, Dh)
-        curr_hyp_emb = self._pool_agents_to_batch(u_agents_now, curr_rho_batch) 
+        # u_agents_now = self.hyp_context(demo_hyp_all, curr_rho_batch, mask=None)   # (B, A, Dh)
+        # curr_hyp_emb = self._pool_agents_to_batch(u_agents_now, curr_rho_batch) 
 
         # 3 : rho(g) alignment (not that good)
         # curr_hyp_emb, _  = self.hyp_context(curr_rho_batch, demo_rho_batch, demo_hyp_all)
@@ -214,13 +214,14 @@ class Policy(nn.Module):
         ## choose 1 of 3. like above 
 
         # 1 learnt param 
-        # pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
-        
+        pred_hyp_emb = self.curr_hyp_emb.repeat(B,T,1) # [B, T, dh] (general approximation, not the best, if dont work well replace with nn.param)
+        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
+
         # 2 seed: vectorize over T: merge (B,T) -> BT
-        rho_bt   = pred_rho_batch.reshape(B*T, num_agent_nodes, -1)              # (BT, A, de)
-        demo_bt  = demo_hyp_all.repeat_interleave(T, dim=0)                       # (BT, N, L, Dh)
-        u_agents_seq = self.hyp_context(demo_bt, rho_bt, mask=None)               # (BT, A, Dh)
-        flat_pred_hyp_emb = self._pool_agents_to_batch(u_agents_seq, rho_bt)                  # (BT, Dh)  
+        # rho_bt   = pred_rho_batch.reshape(B*T, num_agent_nodes, -1)              # (BT, A, de)
+        # demo_bt  = demo_hyp_all.repeat_interleave(T, dim=0)                       # (BT, N, L, Dh)
+        # u_agents_seq = self.hyp_context(demo_bt, rho_bt, mask=None)               # (BT, A, Dh)
+        # flat_pred_hyp_emb = self._pool_agents_to_batch(u_agents_seq, rho_bt)                  # (BT, Dh)  
             
         # 3 align
         # flat_pred_hyp_emb, _  = self.hyp_context(flat_pred_rho_batch, demo_rho_batch, demo_hyp_all)
