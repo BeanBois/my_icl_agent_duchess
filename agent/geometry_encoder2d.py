@@ -303,8 +303,6 @@ def train_epoch(encoder, decoder, loader, optim):
 
     return total_loss / max(1, len(loader))
 
-
-
 # -----------------------
 # data aux 
 # -----------------------
@@ -318,7 +316,6 @@ def get_pseudogame_clouds(num_clouds = 10):
         pc = obs['coords']
         clouds.append(pc)
     return clouds
-
 
 # -----------------------
 # Training func

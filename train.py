@@ -319,16 +319,17 @@ class PerNodeDenoisingMSELoss(nn.Module):
     loss : scalar tensor (mean MSE over B*T*A*5)
     """
 
-    def __init__(self, pos_scale, reduction: str = "mean"):
+    def __init__(self, pos_scale, rot_scale, reduction: str = "mean"):
         super().__init__()
         self.reduction = reduction
         self.pos_scale = pos_scale
+        self.rad_scale = math.radians(rot_scale)
         self.mse = nn.MSELoss(reduction="mean")  # we average at the very end
 
     @staticmethod
     def _default_keypoints(device, dtype):
         kp = [PseudoDemoDataset.agent_kp[k] for k in PseudoDemoDataset.kp_order]
-        pts = torch.tensor([kp], device=device, dtype=dtype)
+        pts = torch.tensor(kp, device=device, dtype=dtype)
         return pts  # [A,2]
 
     def forward(
@@ -401,7 +402,10 @@ class PerNodeDenoisingMSELoss(nn.Module):
 
         eps_gt = torch.cat([dt, dr, ds_exp], dim=-1)  # [B,T,A,5]
         eps_gt_norm = eps_gt.clone()
-        eps_gt_norm[..., 0:4] = eps_gt_norm[..., 0:4] / self.pos_scale
+        eps_gt_norm[..., 0:2] = eps_gt_norm[..., 0:2] / self.pos_scale
+        kp_norms = keypoints.norm(dim = -1)
+        eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / (self.rad_scale * kp_norms[None, None, :, None])
+        eps_gt_norm[torch.isnan(eps_gt_norm)] = 0
 
         # --- MSE -------------------------------------------------------------
         # NOTE: The paper normalises components to [-1,1] during training to balance magnitudes.
@@ -428,7 +432,7 @@ class TrainConfig:
     amp: bool = True
     hyp_curvature: float = 1.0
     num_sampled_pc = 8
-    num_att_heads = 4
+    num_att_heads = 8
     euc_head_dim = 32
     hyp_dim = 2
     in_dim_agent = 9
@@ -436,13 +440,14 @@ class TrainConfig:
     pred_horizon = 5
     demo_length = 20
     max_translation = 200
+    max_rotation = 30
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
     num_chosen_pc = 512
 
     # flags
-    train_geo_encoder = False
+    train_geo_encoder = True
     biased_odds = 0.5
     augmented_odds = 0.1
 
@@ -457,7 +462,7 @@ if __name__ == "__main__":
         geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d")
     else:
         state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
-        geometry_encoder.impl.load_state_dict(state)
+        geometry_encoder.impl.load_state_dict(state['encoder']) # remove encoder later
     os.makedirs(cfg.out_dir, exist_ok=True)
     
 
@@ -469,6 +474,7 @@ if __name__ == "__main__":
     agent = Agent(
         geometric_encoder=geometry_encoder,
         max_translation=cfg.max_translation,
+        max_rotation=cfg.max_rotation,
         max_diff_timesteps=cfg.max_diffusion_steps,
         beta_start=cfg.beta_start,
         beta_end=cfg.beta_end,
@@ -482,7 +488,7 @@ if __name__ == "__main__":
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
     # --- Losses
-    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation)
+    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale = cfg.max_rotation)
 
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],

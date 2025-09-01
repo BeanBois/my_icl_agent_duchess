@@ -43,6 +43,7 @@ def fourier_embed_2d(delta: Tensor, num_freqs: int = 10) -> Tensor:
     ang = delta.unsqueeze(-1) * freqs  # [E,2,F]
     sin_x, cos_x = torch.sin(ang[:, 0, :]), torch.cos(ang[:, 0, :])
     sin_y, cos_y = torch.sin(ang[:, 1, :]), torch.cos(ang[:, 1, :])
+    
     return torch.cat([sin_x, cos_x, sin_y, cos_y], dim=-1)  # [E, 4F]
 
 # point care aux
