@@ -445,7 +445,7 @@ class TrainConfig:
     num_chosen_pc = 512
 
     # flags
-    train_geo_encoder = False
+    train_geo_encoder = True
     biased_odds = 0.5
     augmented_odds = 0.1
 
