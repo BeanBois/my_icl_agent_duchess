@@ -324,7 +324,7 @@ class PerNodeDenoisingMSELoss(nn.Module):
         self.reduction = reduction
         self.pos_scale = pos_scale
         self.rad_scale = math.radians(rot_scale)
-        self.mse = nn.MSELoss(reduction="mean")  # we average at the very end
+        self.mse = nn.MSELoss(reduction=reduction)  # we average at the very end
 
     @staticmethod
     def _default_keypoints(device, dtype):
@@ -447,7 +447,7 @@ class TrainConfig:
     num_chosen_pc = 512
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
     biased_odds = 0.5
     augmented_odds = 0.1
 
@@ -462,7 +462,7 @@ if __name__ == "__main__":
         geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d")
     else:
         state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
-        geometry_encoder.impl.load_state_dict(state['encoder']) # remove encoder later
+        geometry_encoder.impl.load_state_dict(state) # remove encoder later
     os.makedirs(cfg.out_dir, exist_ok=True)
     
 
@@ -488,7 +488,7 @@ if __name__ == "__main__":
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
 
     # --- Losses
-    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale = cfg.max_rotation)
+    pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale = cfg.max_rotation, reduction='sum')
 
     # --- Optim
     optim = AdamW([p for p in agent.parameters() if p.requires_grad],
