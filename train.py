@@ -3,7 +3,6 @@ import math
 import json
 import random
 from dataclasses import dataclass
-from turtle import forward
 from typing import List, Tuple, Optional, Dict
 
 from agent import Agent
@@ -22,11 +21,11 @@ class Item:
     # Shapes must match your policy.forward signature
     curr_agent_info: torch.Tensor       # [B, A, 6]
     curr_object_pos: torch.Tensor       # [B, M, 2]
-    clean_actions: torch.Tensor         # [B, T, 3] (or your action dim)
+    clean_actions: torch.Tensor         # [B, T, 4] 
     demo_agent_info: torch.Tensor       # [B, N, L, A, 6]
     demo_object_pos: torch.Tensor       # [B, N, L, M, 2]
     demo_agent_action: torch.Tensor     # [B, N, L-1, 3]
-    # Optional/time channels you may already export:
+
     demo_time: Optional[torch.Tensor] = None  # [B, N, L] monotonically increasing
     curr_time: Optional[torch.Tensor] = None  # [B] or [B, A] if per-node
  
@@ -404,12 +403,11 @@ class PerNodeDenoisingMSELoss(nn.Module):
         eps_gt_norm = eps_gt.clone()
         eps_gt_norm[..., 0:2] = eps_gt_norm[..., 0:2] / self.pos_scale
         kp_norms = keypoints.norm(dim = -1)
-        eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / (self.rad_scale * kp_norms[None, None, :, None])
-        eps_gt_norm[torch.isnan(eps_gt_norm)] = 0
+        denom = (kp_norms * self.rad_scale).clamp_min(1)
+        eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / denom[None, None, :, None]
+        # eps_gt_norm[torch.isnan(eps_gt_norm)] = 0
 
         # --- MSE -------------------------------------------------------------
-        # NOTE: The paper normalises components to [-1,1] during training to balance magnitudes.
-        # If you already normalise actions/flow elsewhere, plain MSE here is correct (ε-targets vs ε-preds) :contentReference[oaicite:3]{index=3}.
         loss = self.mse(pred_eps, eps_gt_norm)
 
         return loss
@@ -424,7 +422,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 20000
+    max_steps: int = 2000000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
