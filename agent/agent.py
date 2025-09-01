@@ -54,7 +54,7 @@ class Agent(nn.Module):
         
         B, T, _ = actions.shape 
         device = actions.device 
-        timesteps = torch.randint(0,self.max_diff_timesteps, (B,T), device = device)
+        timesteps = torch.randint(0,self.max_diff_timesteps, (B,1), device = device).repeat(1,T)
         noisy_actions, _, _ = self.add_action_noise(actions, timesteps) # [B, T, 4]
 
         denoising_directions_normalised = self.policy(
