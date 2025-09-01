@@ -327,11 +327,15 @@ class PseudoGame:
         if self.game_config is None:
             self.game_config = {}
             self.game_config['objects'] = []
-            for _ in range(self.num_objects):
+            possible_objects_combination = [(PseudoEdibleObject, PseudoEdibleObject), (PseudoObstacle,PseudoGoal)]
+            _idx = random.randint(0, len(possible_objects_combination) - 1)
+            objects_class_chosen = possible_objects_combination[_idx]
+            
+            for i in range(self.num_objects):
                 # generate random starting position and choose a random object
                 start_position_x = np.random.randint(OBJECT_SPAWN_OFFSET,self.screen_width - OBJECT_SPAWN_OFFSET) 
                 start_position_y = np.random.randint(OBJECT_SPAWN_OFFSET, self.screen_height - OBJECT_SPAWN_OFFSET) 
-                object_class = random.choice(AVAILABLE_OBJECTS)
+                object_class = objects_class_chosen[i]
                 object = object_class(start_position_x, start_position_y)
                 self.objects.append(object)
                 self.game_config['objects'].append(object_class)
@@ -511,7 +515,6 @@ class PseudoGame:
                 # Check if obstacle blocks the direct path to goal
                 if obst_center is not None and goal_center is not None:
                     is_blocking, intersection_point = is_obstacle_blocking(player_pos, goal_center, obst_center, obst_width, obst_height)
-                    
                     if is_blocking:
                         # Calculate avoidance waypoint
                         to_goal = goal_center - player_pos

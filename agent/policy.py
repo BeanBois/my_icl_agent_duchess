@@ -163,14 +163,19 @@ class Policy(nn.Module):
         # we build SK tree by concatinating curr_agent_pos | pred_agent_pos | deo_agent_pos along L dimension, eseentially treating
         # curr_obs and pred_actions as starting states. This is motivated by the FINE-TO-COARSE IL, which has the idea of just repeating
         # the demonstration after finding a point where the demonstration starts
+        _buffer = torch.zeros(B,N,1,num_agent_nodes,agent_dim)
         _curr_agent_info_temp = curr_agent_info.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
-        _pred_agent_info_temp = pred_agent_info.view(B,1,T,num_agent_nodes,agent_dim).repeat(1,N,1,1,1)
-        _final_data = torch.concat([_curr_agent_info_temp, _pred_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+1,A,6)
-        hyperbolic_embeddings = self.demo_handler(_final_data)
+        # _pred_agent_info_temp = pred_agent_info.view(B,1,T,num_agent_nodes,agent_dim).repeat(1,N,1,1,1)
+        # _final_data = torch.concat([_buffer, _curr_agent_info_temp, _pred_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
+        _final_data = torch.concat([_buffer, _curr_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
+        hyperbolic_embeddings = self.demo_handler(_final_data)[:,:,1:,:] # [B,N,L+T+2,dh]
 
         curr_hyp_emb = hyperbolic_embeddings[:,0,0,:].view(B,-1) # choose form first demo they will be the same 
-        pred_hyp_emb = hyperbolic_embeddings[:,0,1:self.pred_horizon+1,:].view(B,T, -1) # choose form first demo they will be the same smentically
-        demo_hyp_all = hyperbolic_embeddings[:,:,self.pred_horizon+1:,:].view(B,N,L,-1)
+        # pred_hyp_emb = hyperbolic_embeddings[:,0,1:self.pred_horizon+1,:].view(B,T, -1) # choose form first demo they will be the same smentically
+        # demo_hyp_all = hyperbolic_embeddings[:,:,self.pred_horizon+1:,:].view(B,N,L,-1)
+        pred_hyp_emb = curr_hyp_emb.clone().view(B,1,-1).repeat(1,self.pred_horizon,1) # choose form first demo they will be the same smentically
+        demo_hyp_all = hyperbolic_embeddings[:,:,1:,:].view(B,N,L,-1)
+
 
         ############################ Then 'project' to Product manifold space ############################ 
         curr_latent_var = self.context_alignment(
