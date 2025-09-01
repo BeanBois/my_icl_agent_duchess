@@ -317,7 +317,7 @@ if __name__ == "__main__":
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
     # for objective in GameObjective:
     wins = 0
-    objective = GameObjective.REACH_GOAL
+    objective = GameObjective.EAT_ALL
     for _ in range(num_rollouts):
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,

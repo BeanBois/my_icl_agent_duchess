@@ -278,7 +278,7 @@ class PseudoGame:
             self.screen = obj.draw(self.screen)
 
         if plot:
-            for waypoint in self.waypoints:
+            for waypoint in self.plan:
                 center = waypoint[:-1]
                 for i in range(-2,2):
                     for j in range(-2,2):
@@ -413,7 +413,6 @@ class PseudoGame:
                 if np.linalg.norm(player_pos - obj_centers[0]) > np.linalg.norm(player_pos - obj_centers[1]):
                     waypoints.append(obj_centers[1])
                     waypoints.append(obj_centers[0])
-                
                 else:
                     waypoints += obj_centers 
                 while len(waypoints) < self.num_waypoints_used + 1:
@@ -492,7 +491,6 @@ class PseudoGame:
                 # calculate blocking with play orientation, position of player, obstacle center and obstacle width and height
                 # if blocking, find the normal at the point of intersection along the plane, and sample 1 waypoint along this normal by using a random.randint(MIN_OBSTACLE_AVOIDANCE_DIST,MAX_OBSTACLE_AVOIDANCE_DIST)
                 # since the deviation can be either 'left' or 'right', make sure to choose the right side
-
                 player_pos = np.array(self.player.get_pos())
                 waypoints.append(player_pos)
 
@@ -835,3 +833,8 @@ class PseudoGame:
         return
     
 
+
+if __name__ == "__main__":
+
+    pg = PseudoGame(biased=True)
+    pg.run()
