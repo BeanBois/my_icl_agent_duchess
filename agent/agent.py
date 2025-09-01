@@ -141,7 +141,7 @@ class Agent(nn.Module):
 
             # one-step denoise to get a0_hat
             denoise = self.policy(curr_agent_info, curr_object_pos,
-                                demo_agent_info, demo_object_pos, a_t)      # [B,T,A,5]
+                                demo_agent_info, demo_object_pos, a_t, mode='eval')      # [B,T,A,5]
             a0_hat  = self._svd_refine_once(a_t, denoise, keypoints)          # [B,T,4]
             x0_hat  = torch.cat([se2_log(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
 

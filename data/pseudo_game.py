@@ -833,8 +833,3 @@ class PseudoGame:
         return
     
 
-
-if __name__ == "__main__":
-
-    pg = PseudoGame(biased=True)
-    pg.run()

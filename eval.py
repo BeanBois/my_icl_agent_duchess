@@ -230,8 +230,8 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
 
     return demo_agent_info, demo_object_pos
 
-def action_from_vec(actions): #x,y,theta,state_change [4] vector 
-    action = actions[0]
+def action_from_vec(action): #x,y,theta,state_change [4] vector 
+    action = action
     state_action = None 
     for state in PlayerState:
         if round(torch.clamp(action[-1],0,1).item()) == state.value:
@@ -267,7 +267,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
             K = refine,
             keypoints = keypoints
         )  # [B,T,4]
-        for a0 in actions: 
+        for a0 in actions[0]: 
             action_obj = action_from_vec(a0)
             curr_obs = game_interface.step(action_obj)
             done = curr_obs['done']
@@ -275,6 +275,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1
+            break # take first action only
     return won 
         
 
@@ -317,13 +318,13 @@ if __name__ == "__main__":
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
     # for objective in GameObjective:
     wins = 0
-    objective = GameObjective.EAT_ALL
+    objective = GameObjective.REACH_GOAL
     for _ in range(num_rollouts):
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,
             objective=objective
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=30, refine =5))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=30, refine =30))
     print(f'Won {wins} / {num_rollouts} for {objective}')
     
 

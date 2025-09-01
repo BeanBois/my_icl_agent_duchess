@@ -420,7 +420,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-4
     weight_decay: float = 1e-4
-    max_steps: int = 5000
+    max_steps: int = 20000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -443,8 +443,8 @@ class TrainConfig:
 
     # flags
     train_geo_encoder = False
-    biased_odds = 1
-    augmented_odds = 0
+    biased_odds = 0.5
+    augmented_odds = 0.1
 
 
 if __name__ == "__main__":
