@@ -61,10 +61,10 @@ class PseudoDemoDataset(Dataset):
 
         
         curr_obs, context, _clean_actions = self.data_gen.get_batch_samples(self.B)
-        _offset_index = random.randint(0,len(curr_obs[0]) - 1) if len(curr_obs[0]) > 0 else 0
-        curr_agent_info, curr_object_pos = self._process_obs(curr_obs, _offset_index)
+        # _offset_index = random.randint(0,len(curr_obs[0]) - 1) if len(curr_obs[0]) > 0 else 0
+        curr_agent_info, curr_object_pos = self._process_obs(curr_obs)
         demo_agent_info, demo_object_pos, demo_agent_action = self._process_context(context)
-        clean_actions = self._process_actions(_clean_actions, _offset_index)
+        clean_actions = self._process_actions(_clean_actions)
         
         # Monotone times for each demo traj
         base = torch.arange(L).float()[None, None, :].expand(B, N, L)
@@ -78,7 +78,7 @@ class PseudoDemoDataset(Dataset):
             demo_time=demo_time, curr_time=curr_time
         )
 
-    def _process_obs(self, curr_obs: List[Dict], _offset_index):
+    def _process_obs(self, curr_obs: List[Dict]):
         """
         curr_obs: list length B. Each element is a list of observation dicts
                   (from PDGen._get_ground_truth: 'curr_obs_set').
@@ -94,57 +94,64 @@ class PseudoDemoDataset(Dataset):
         kp_local = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]  # local-frame offsets
         kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  # [4,2]
 
-        agent_infos = []
-        obj_coords_all = []
+        all_agent_infos = []
+        all_obj_coords = []
+        for i in range(len(curr_obs[0])):
+            agent_infos = []
+            obj_coords = []
 
-        for b in range(B):
-            # Use the first "current" obs for this sample
+            for b in range(B):
+                # Use the first "current" obs for this sample
 
-            ob = curr_obs[b][_offset_index] if isinstance(curr_obs[b], list) else curr_obs[b]
+                ob = curr_obs[b][i] if isinstance(curr_obs[b], list) else curr_obs[b]
 
-            # Scalars
-            cx, cy = float(ob["agent-pos"][0][0]), float(ob["agent-pos"][0][1])
-            ori_deg = float(ob["agent-orientation"])
-            ori_rad = math.radians(ori_deg)
-            st = ob["agent-state"]
-            st_val = float(getattr(st, "value", st))  # enum -> int if needed
-            t_val = float(ob["time"])
-            done_val = float(bool(ob["done"]))
+                # Scalars
+                cx, cy = float(ob["agent-pos"][0][0]), float(ob["agent-pos"][0][1])
+                ori_deg = float(ob["agent-orientation"])
+                ori_rad = math.radians(ori_deg)
+                st = ob["agent-state"]
+                st_val = float(getattr(st, "value", st))  # enum -> int if needed
+                t_val = float(ob["time"])
+                done_val = float(bool(ob["done"]))
 
-            # Rotate local KPs to world and translate by agent center
-            c, s = math.cos(ori_rad), math.sin(ori_rad)
-            R = torch.tensor([[c, -s],
-                              [s,  c]], dtype=torch.float32, device=device)     # [2,2]
-            kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)  # [4,2]
+                # Rotate local KPs to world and translate by agent center
+                c, s = math.cos(ori_rad), math.sin(ori_rad)
+                R = torch.tensor([[c, -s],
+                                [s,  c]], dtype=torch.float32, device=device)     # [2,2]
+                kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)  # [4,2]
 
-            # Pack [x,y,orientation,state,time,done] per keypoint
-            o = torch.full((A, 1), ori_deg, dtype=torch.float32, device=device)
-            stt = torch.full((A, 1), st_val, dtype=torch.float32, device=device)
-            tt = torch.full((A, 1), t_val, dtype=torch.float32, device=device)
-            dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
-            agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
-            agent_infos.append(agent_info)
+                # Pack [x,y,orientation,state,time,done] per keypoint
+                o = torch.full((A, 1), ori_deg, dtype=torch.float32, device=device)
+                stt = torch.full((A, 1), st_val, dtype=torch.float32, device=device)
+                tt = torch.full((A, 1), t_val, dtype=torch.float32, device=device)
+                dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
+                agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
+                agent_infos.append(agent_info)
 
-            # Object coords → pick exactly M 2D points
-            coords_np = ob["coords"]  # numpy array [K,2] (possibly K != M)
-            K = int(coords_np.shape[0])
-            if K == 0:
-                # nothing detected → zeros
-                sel = torch.zeros((M, 2), dtype=torch.float32, device=device)
-            elif K >= M:
-                idx = np.random.choice(K, size=M, replace=False)
-                sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
-            else:
-                # not enough points → repeat with replacement
-                idx = np.random.choice(K, size=M, replace=True)
-                sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
-            obj_coords_all.append(sel)
-
-        curr_agent_info = torch.stack(agent_infos, dim=0)  # [B,4,6]
-        curr_object_pos = torch.stack(obj_coords_all, dim=0)  # [B,M,2]
+                # Object coords → pick exactly M 2D points
+                coords_np = ob["coords"]  # numpy array [K,2] (possibly K != M)
+                K = int(coords_np.shape[0])
+                if K == 0:
+                    # nothing detected → zeros
+                    sel = torch.zeros((M, 2), dtype=torch.float32, device=device)
+                elif K >= M:
+                    idx = np.random.choice(K, size=M, replace=False)
+                    sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
+                else:
+                    # not enough points → repeat with replacement
+                    idx = np.random.choice(K, size=M, replace=True)
+                    sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
+                obj_coords.append(sel)
+            agent_infos_tensor = torch.stack(agent_infos, dim=0)
+            obj_info_tensor = torch.stack(obj_coords,dim= 0)
+            all_agent_infos.append(agent_infos_tensor)
+            all_obj_coords.append(obj_info_tensor)
+            
+            curr_agent_info = torch.stack(all_agent_infos, dim=0)  # [K,B,4,6]
+            curr_object_pos = torch.stack(all_obj_coords, dim=0)  # [K,B,M,2]
         return curr_agent_info, curr_object_pos
 
-    def _process_actions(self, _clean_actions: List[List[torch.Tensor]], _offset_index):
+    def _process_actions(self, _clean_actions: List[List[torch.Tensor]]):
         """
         _clean_actions: list length B; each element is a LIST of length >=1,
                         where each entry is a [T, 10] tensor:
@@ -162,30 +169,35 @@ class PseudoDemoDataset(Dataset):
             theta = torch.atan2(M[1, 0], M[0, 0])
             return torch.stack([tx, ty, theta], dim=0)  # [3]
 
-        out = []
-        for b in range(B):
-            # take the offset_index pred-horizon sequence for this sample
-            seq = _clean_actions[b][_offset_index]  # [T, 10] on same device as generator set
-            # Robustness: pad/truncate to T if needed
-            Tb = seq.shape[0]
-            if Tb < T:
-                pad = torch.zeros((T - Tb, seq.shape[1]), dtype=seq.dtype, device=seq.device)
-                seq = torch.cat([seq, pad], dim=0)
-            elif Tb > T:
-                seq = seq[:T]
+        num_action_sets = len(_clean_actions[0])
+        all_out = []
+        for i in range(num_action_sets):
+            out = []
+            for b in range(B):
+                # take the offset_index pred-horizon sequence for this sample
+                seq = _clean_actions[b][i]  # [T, 10] on same device as generator set
+                # Robustness: pad/truncate to T if needed
+                Tb = seq.shape[0]
+                if Tb < T:
+                    pad = torch.zeros((T - Tb, seq.shape[1]), dtype=seq.dtype, device=seq.device)
+                    seq = torch.cat([seq, pad], dim=0)
+                elif Tb > T:
+                    seq = seq[:T]
 
-            # Convert each step
-            vecs = []
-            for t in range(T):
-                m9 = seq[t, :9]  # first 9 entries are SE(2)
-                state_action = seq[t,-1].view(1)
-                _vec = mat_to_vec(m9)
-                vec = torch.concat([_vec,state_action])
-                vecs.append(vec)
-            vecs = torch.stack(vecs, dim=0).to(device)  # [T,3]
-            out.append(vecs)
+                # Convert each step
+                vecs = []
+                for t in range(T):
+                    m9 = seq[t, :9]  # first 9 entries are SE(2)
+                    state_action = seq[t,-1].view(1)
+                    _vec = mat_to_vec(m9)
+                    vec = torch.concat([_vec,state_action])
+                    vecs.append(vec)
+                vecs = torch.stack(vecs, dim=0).to(device)  # [T,3]
+                out.append(vecs)
+            out_tensor = torch.stack(out, dim = 0)
+            all_out.append(out_tensor)
 
-        return torch.stack(out, dim=0)  # [B,T,3]
+        return torch.stack(all_out, dim=0)  # [K,B,T,3]
 
     def _process_context(self, context: List[Tuple]):
         """
@@ -438,14 +450,14 @@ class TrainConfig:
     pred_horizon = 5
     demo_length = 20
     max_translation = 200
-    max_rotation = 30
+    max_rotation = 180
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
     num_chosen_pc = 512
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
     biased_odds = 0.5
     augmented_odds = 0.1
 
@@ -457,7 +469,8 @@ if __name__ == "__main__":
     cfg = TrainConfig()
     geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim)
     if cfg.train_geo_encoder:  
-        geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, save_path=f"geometry_encoder_2d")
+        geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, 
+                                                    save_path=f"geometry_encoder_2d", num_epochs=100, num_samples=2000)
     else:
         state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
         geometry_encoder.impl.load_state_dict(state) # remove encoder later
@@ -507,35 +520,41 @@ if __name__ == "__main__":
 
             # Move to device
             def dev(x): return None if x is None else x.to(cfg.device)
-            curr_agent_info = dev(item.curr_agent_info)
-            curr_object_pos = dev(item.curr_object_pos)
-            clean_actions   = dev(item.clean_actions)
+            curr_agent_info_set = dev(item.curr_agent_info)
+            curr_object_pos_set = dev(item.curr_object_pos)
+            clean_actions_set   = dev(item.clean_actions)
             demo_agent_info = dev(item.demo_agent_info)
             demo_object_pos = dev(item.demo_object_pos)
             demo_agent_action = dev(item.demo_agent_action)
             demo_time = dev(item.demo_time)
             curr_time = dev(item.curr_time)
-
             optim.zero_grad(set_to_none=True)
+            K = curr_agent_info_set.shape[0]
             
-
             with torch.amp.autocast(cfg.device, enabled=use_amp):
-                pred_pn_denoising_dir_normalised, noisy_actions = agent(
-                    curr_agent_info,
-                    curr_object_pos,
-                    demo_agent_info,
-                    demo_object_pos,
-                    clean_actions
-                )
+                total_loss = 0.0
+                for k in range(K):    
+                    curr_agent_info = curr_agent_info_set[k]
+                    curr_object_pos = curr_object_pos_set[k]
+                    clean_actions = clean_actions_set[k]
+                    pred_pn_denoising_dir_normalised, noisy_actions = agent(
+                        curr_agent_info,
+                        curr_object_pos,
+                        demo_agent_info,
+                        demo_object_pos,
+                        clean_actions
+                    )
 
 
-                loss = pnn_loss(
-                    clean_actions,
-                    noisy_actions, 
-                    pred_pn_denoising_dir_normalised
-                )
+                    loss = pnn_loss(
+                        clean_actions,
+                        noisy_actions, 
+                        pred_pn_denoising_dir_normalised
+                    )
+                    total_loss = total_loss + loss
+                mean_loss = total_loss / K
 
-            scaler.scale(loss).backward()
+            scaler.scale(mean_loss).backward()
             if cfg.grad_clip is not None:
                 scaler.unscale_(optim)
                 torch.nn.utils.clip_grad_norm_(agent.parameters(), cfg.grad_clip)
@@ -543,7 +562,7 @@ if __name__ == "__main__":
             scaler.update()
 
             # update loss
-            avg_loss += loss.item()
+            avg_loss += float(mean_loss.detach().cpu())
 
             if step % cfg.log_every == 0:
                 avg_losses.append((step, avg_loss/cfg.log_every))

@@ -152,7 +152,7 @@ class PatchDecoder(nn.Module):
 
 
 # Config
-M_NODES        = 8      # nodes per cloud (match Instant Policy default)
+M_NODES        = 8      # nodes per cloud 
 K_NEIGHBORS    = 64      # per-patch kNN
 FOURIER_L      = 6
 FEAT_DIM       = 128
