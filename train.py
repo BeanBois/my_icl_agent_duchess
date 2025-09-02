@@ -432,7 +432,7 @@ class PerNodeDenoisingMSELoss(nn.Module):
 class TrainConfig:
     device: str = "cpu"
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
-    lr: float = 1e-4
+    lr: float = 1e-6
     weight_decay: float = 1e-4
     max_steps: int = 2000000
     log_every: int = 50
@@ -457,7 +457,7 @@ class TrainConfig:
     num_chosen_pc = 512
 
     # flags
-    train_geo_encoder = True
+    train_geo_encoder = False
     biased_odds = 0.5
     augmented_odds = 0.1
 

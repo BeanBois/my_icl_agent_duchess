@@ -176,7 +176,7 @@ class Policy(nn.Module):
         _final_data = torch.concat([_buffer, _curr_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
         hyperbolic_embeddings = self.demo_handler(_final_data)[:,:,1:,:] # [B,N,L+T+2,dh]
 
-        curr_hyp_emb = hyperbolic_embeddings[:,0,0,:].view(B,-1) # choose form first demo they will be the same 
+        curr_hyp_emb = hyperbolic_embeddings[:,:,0,:].view(B,-1) # choose form first demo they will be the same 
         # pred_hyp_emb = hyperbolic_embeddings[:,0,1:self.pred_horizon+1,:].view(B,T, -1) # choose form first demo they will be the same smentically
         # demo_hyp_all = hyperbolic_embeddings[:,:,self.pred_horizon+1:,:].view(B,N,L,-1)
         pred_hyp_emb = curr_hyp_emb.clone().view(B,1,-1).repeat(1,self.pred_horizon,1) # choose form first demo they will be the same smentically
@@ -191,7 +191,7 @@ class Policy(nn.Module):
             demo_hyp_all
         ) # [B, A, z_dim]
        
-        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, -1)
+        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, N, -1)
         flat_pred_latent_variables = self.context_alignment(
             flat_pred_rho_batch, # [B*T, A, de ]
             flat_pred_hyp_emb, # [B*T, dh]
