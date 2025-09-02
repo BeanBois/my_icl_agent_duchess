@@ -176,7 +176,7 @@ class Policy(nn.Module):
         _final_data = torch.concat([_buffer, _curr_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
         hyperbolic_embeddings = self.demo_handler(_final_data)[:,:,1:,:] # [B,N,L+T+2,dh]
 
-        curr_hyp_emb = hyperbolic_embeddings[:,:,0,:].view(B,-1) # choose form first demo they will be the same 
+        curr_hyp_emb = hyperbolic_embeddings[:,:,0,:].view(B,N,-1) # choose form first demo they will be the same 
         # pred_hyp_emb = hyperbolic_embeddings[:,0,1:self.pred_horizon+1,:].view(B,T, -1) # choose form first demo they will be the same smentically
         # demo_hyp_all = hyperbolic_embeddings[:,:,self.pred_horizon+1:,:].view(B,N,L,-1)
         pred_hyp_emb = curr_hyp_emb.clone().view(B,1,-1).repeat(1,self.pred_horizon,1) # choose form first demo they will be the same smentically
@@ -191,15 +191,23 @@ class Policy(nn.Module):
             demo_hyp_all
         ) # [B, A, z_dim]
        
-        flat_pred_hyp_emb = pred_hyp_emb.view(B*T, N, -1)
+        # 5) Future steps: flatten B and T together, but KEEP N
+        #    - Pred queries:  [B*T, N, dh]
+        #    - Demos:         need to be repeated across T -> [B*T, N, L, A, de], [B*T, N, L, dh]
+        flat_pred_hyp_emb   = pred_hyp_emb.view(B*T, N, -1)  # [B*T, N, dh]
+        demo_rho_bt         = demo_rho_batch.repeat_interleave(T, dim=0)  # [B*T, N, L, A, de]
+        demo_hyp_bt         = demo_hyp_all.repeat_interleave(T, dim=0)    # [B*T, N, L, dh]
+
+        # 6) Flattened pred Euclidean queries already exist in your code:
+        #    flat_pred_rho_batch: [B*T, A, de]
+
         flat_pred_latent_variables = self.context_alignment(
-            flat_pred_rho_batch, # [B*T, A, de ]
-            flat_pred_hyp_emb, # [B*T, dh]
-            demo_rho_batch,
-            demo_hyp_all,
-        ) # [B*T, A, z_dim]
-        pred_latent_variables = flat_pred_latent_variables.view(B,T,num_agent_nodes,-1) # [B,T, A, z_dim]
-        
+            flat_pred_rho_batch,   # [B*T, A, de]
+            flat_pred_hyp_emb,     # [B*T, N, dh]  <-- KEEP N here
+            demo_rho_bt,           # [B*T, N, L, A, de]
+            demo_hyp_bt            # [B*T, N, L, dh]
+        )  # -> [B*T, A, z_dim]
+        pred_latent_variables = flat_pred_latent_variables.view(B, T, num_agent_nodes, -1) 
         ############################ info Z_current => Z_predicted  ############################ 
         # like in IP 
         # Z_current <= curr_latent_var [B,A,z]

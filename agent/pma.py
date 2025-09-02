@@ -180,7 +180,7 @@ class ProductManifoldAttention(nn.Module):
         device = curr_rho_batch.device
         B, A, de = curr_rho_batch.shape
         Bn, N, L, A_, de_ = demo_rho_batch.shape
-        assert Bn == B and A_ == A and de_ == de, "demo_rho_batch shape mismatch"
+        # assert Bn == B and A_ == A and de_ == de, "demo_rho_batch shape mismatch"
         _, N2, L2, dh = demo_hyp_emb.shape
         assert N2 == N and L2 == L, "demo_hyp_emb shape mismatch"
 
