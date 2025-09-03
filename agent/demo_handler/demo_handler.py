@@ -61,6 +61,18 @@ def exp_map_x(x, v, c):
     return mobius_add(x, poincare_exp0(step, c), c)
 
 # ---------- tree utilities ----------
+# clustering is done based on 2 conditions
+    # if next proceeding agent_info state has changed, then the next_proceeding obs becomes new parent
+    # else if abs(angle_parent - angle_next) > angular_granulity, then it becomes new parent
+# an example tree is as such : 
+#                   empty root 
+#                  /         \
+#                 1           7
+#                / \         / \
+#               2   4        8  10
+#              /.  /  \.     |.  | \
+#             3.  5.   6.    9.  11 12
+
 def _cluster(
         cluster_idxs,
         theta,
