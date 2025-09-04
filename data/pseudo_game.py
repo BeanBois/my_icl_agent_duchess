@@ -275,7 +275,7 @@ class PseudoGame:
         #     self.object.eaten = True 
         return 
     
-    def draw(self, plot = True):
+    def draw(self, plot = False):
         self.screen[:,:] = WHITE
 
         self.screen = self.player.draw(self.screen)
