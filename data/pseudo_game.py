@@ -229,10 +229,11 @@ class PseudoGame:
         state_change = next((ps for ps in PlayerState if ps.value == state_val), PlayerState.NOT_EATING)
 
         px, py = map(float, self.player.get_pos())
-        theta_deg = float(self.player.get_orientation(mode='deg'))  # 0=East, +CCW
+        theta_deg = float(self.player.get_orientation(mode='deg'))  # 0=East, +CW
+        
 
         dx, dy = target[0] - px, target[1] - py
-        dist = int(np.hypot(dx, dy))
+        dist = np.hypot(dx, dy)
 
         WAYPOINT_THRESHOLD = max(1.0, float(PLAYER_SIZE) * 1)
         # DEG_THRESHOLD = 5 # deg
@@ -258,8 +259,9 @@ class PseudoGame:
         forward_cmd = float(min(dist, MAX_FORWARD_DIST) * align)
         rotation_cmd = float(np.clip(err, -MAX_ROTATION, MAX_ROTATION))
         action = Action(forward_movement=forward_cmd, rotation_deg=rotation_cmd, state_change=state_change)
-        self.actions.append(action)
         self.player.move_with_action(action)
+        action = Action(forward_movement=forward_cmd, rotation_deg=-rotation_cmd, state_change=state_change)
+        self.actions.append(action)
 
         px2, py2 = map(float, self.player.get_pos())
         if int(np.hypot(target[0] - px2, target[1] - py2)) <= WAYPOINT_THRESHOLD:
@@ -278,9 +280,9 @@ class PseudoGame:
     def draw(self, plot = False):
         self.screen[:,:] = WHITE
 
-        self.screen = self.player.draw(self.screen)
+        self.screen = self.player.draw(self.screen, self.screen_height)
         for obj in self.objects:
-            self.screen = obj.draw(self.screen)
+            self.screen = obj.draw(self.screen, self.screen_height)
 
         if plot:
             H, W = self.screen.shape[:2]
@@ -292,16 +294,17 @@ class PseudoGame:
                         r = row + dr
                         c = col + dc
                         if 0 <= r < H and 0 <= c < W:
-                            self.screen[r, c] = [0, 0, 0]
+                            self.screen[r, c] = [123, 123, 123]
+                print(row,col)
             self.plot_screen()
 
-    
     def plot_screen(self):
         H, W = self.screen.shape[:2]
         plt.imshow(
             self.screen,
-            origin="upper",          # top-left origin (pygame-like)
-            extent=[0, W, H, 0],     # x: 0..W, y (down): 0..H
+            origin="upper",
+    #         extent=[0, W, H, 0],     # x: 0..W, y (down): 0..H
+            extent=[0, W, 0, H],   # <-- was [0, W, H, 0]; don't invert y here
             interpolation="nearest",
         )
         plt.gca().set_aspect("equal")
@@ -861,5 +864,5 @@ class PseudoGame:
 
 
 if __name__ == "__main__":
-    pg = PseudoGame()
+    pg = PseudoGame(biased=True)
     pg.run()
