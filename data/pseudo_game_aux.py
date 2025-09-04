@@ -115,7 +115,6 @@ class PseudoPlayer:
         # we need to update self.x, self.y and self.angle respectively
         
         movement_vector = action.as_vector(mode='deg')
-        print(movement_vector)
         state_change_action = movement_vector[2]
         angle = movement_vector[1]
         # Update the object's angle (add the rotation to current angle)

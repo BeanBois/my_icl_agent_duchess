@@ -260,7 +260,6 @@ class PseudoGame:
         rotation_cmd = float(np.clip(err, -MAX_ROTATION, MAX_ROTATION))
         action = Action(forward_movement=forward_cmd, rotation_deg=rotation_cmd, state_change=state_change)
         self.player.move_with_action(action)
-        action = Action(forward_movement=forward_cmd, rotation_deg=-rotation_cmd, state_change=state_change)
         self.actions.append(action)
 
         px2, py2 = map(float, self.player.get_pos())
@@ -295,7 +294,6 @@ class PseudoGame:
                         c = col + dc
                         if 0 <= r < H and 0 <= c < W:
                             self.screen[r, c] = [123, 123, 123]
-                print(row,col)
             self.plot_screen()
 
     def plot_screen(self):
