@@ -314,17 +314,17 @@ if __name__ == "__main__":
     agent.load_state_dict(agent_state_dict['model'])
     agent.eval()
     print('Start evaluating')
-    num_rollouts = 20
+    num_rollouts = 10
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
     # for objective in GameObjective:
     wins = 0
-    objective = GameObjective.REACH_GOAL
+    objective = GameObjective.EAT_ALL
     for _ in range(num_rollouts):
         game_interface = GameInterface(
             mode=GameMode.DEMO_MODE,
             objective=objective
         )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=30, refine =30))
+        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=10, refine =5))
     print(f'Won {wins} / {num_rollouts} for {objective}')
     
 

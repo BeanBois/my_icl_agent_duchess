@@ -1,25 +1,26 @@
 {
-    "screen_width": 800,
-    "screen_height": 600,
+    "screen_width": 400,
+    "screen_height": 300,
     "objective": 1,
+    "player_start_pos" : [50,50],
     "objective_cfg": {
         "difficulty": null,
         "target": [
-            404.7007678459942,
-            477.5068892000399
+            0.0,
+            0.0
         ]
     },
     "edibles": [
         {
-            "x": 729,
-            "y": 347,
+            "x": 200,
+            "y": 200,
             "width": 24,
             "height": 20,
             "eaten": false
         },
         {
-            "x": 194,
-            "y": 229,
+            "x": 140,
+            "y": 100,
             "width": 20,
             "height": 25,
             "eaten": false

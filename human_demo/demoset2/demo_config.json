@@ -1,18 +1,20 @@
 {
-    "screen_width": 800,
-    "screen_height": 600,
+    "screen_width": 400,
+    "screen_height": 300,
     "objective": 3,
+    "player_start_pos" : [50,50],
+
     "objective_cfg": {
         "difficulty": null,
         "target": [
-            600,
-            400
+            200,
+            200
         ]
     },
     "edibles": [
         {
-            "x": 400,
-            "y": 300,
+            "x": 50,
+            "y": 50,
             "width": 20,
             "height": 20,
             "eaten": false
@@ -20,8 +22,8 @@
     ],
     "obstacles": [],
     "goal": {
-            "x": 600,
-            "y": 400
+            "x": 200,
+            "y": 200
         },
     "game_over": false,
     "game_won": false

@@ -1,12 +1,14 @@
 {
-    "screen_width": 800,
-    "screen_height": 600,
+    "screen_width": 400,
+    "screen_height": 300,
     "objective": 4,
+    "player_start_pos" : [50,50],
+
     "objective_cfg": {
         "difficulty": null,
         "target": [
-            400,
-            300
+            200,
+            200
         ]
     },
     "edibles": [
