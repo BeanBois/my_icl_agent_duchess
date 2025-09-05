@@ -100,7 +100,7 @@ class Agent(nn.Module):
             actions = torch.zeros(B, T, 4, device=device, dtype=dtype)
             actions = torch.zeros(B, T, 4, device=device, dtype=dtype)
             actions[...,:2] = torch.randn(B, T, 2, device=device) * (self.max_translation / 10.0)
-            actions[...,2:3] = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/6)  # +/- 30°
+            actions[...,2:3] = (torch.rand(B, T, 1, device=device) - 0.5) * (2*torch.pi/9)  # +/- 20°
             actions[...,3:4] = torch.full((B,T,1), 0.5, device=device)
         else:
             T = actions.shape[1]

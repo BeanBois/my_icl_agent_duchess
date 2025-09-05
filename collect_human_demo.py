@@ -356,14 +356,14 @@ if __name__ == "__main__":
     # Collect all demos
     # collect_human_demos()
     # Inspect a specific demo
-    demo = load_and_inspect_demo(demoset_id=0, demo_id=0)
-    print(len(demo))
+    # demo = load_and_inspect_demo(demoset_id=0, demo_id=0)
+    # print(len(demo))
 
     # collect_human_demos(num_types_demo=4,demoset_size=10)
 
 
-    # from data import GameObjective
-    # collect_human_demos_for(GameObjective.REACH_GOAL, 7)
+    from data import GameObjective
+    collect_human_demos_for(GameObjective.REACH_GOAL, 4)
     
     # Replay a demo with its configuration (for sanity check)
     # replay_demo_with_config(demoset_id=0, demo_id=0)

@@ -115,10 +115,14 @@ class PseudoDemoDataset(Dataset):
                 done_val = float(bool(ob["done"]))
 
                 # Rotate local KPs to world and translate by agent center
+                # c, s = math.cos(ori_rad), math.sin(ori_rad)
+                # R = torch.tensor([[c, -s],
+                #                 [s,  c]], dtype=torch.float32, device=device)     # [2,2]
+                # kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)  # [4,2]
                 c, s = math.cos(ori_rad), math.sin(ori_rad)
-                R = torch.tensor([[c, -s],
-                                [s,  c]], dtype=torch.float32, device=device)     # [2,2]
-                kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)  # [4,2]
+                R = torch.tensor([[ c,  s],
+                                [-s,  c]], dtype=torch.float32, device=device)   # CW ✅
+                kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)
 
                 # Pack [x,y,orientation,state,time,done] per keypoint
                 o = torch.full((A, 1), ori_deg, dtype=torch.float32, device=device)
@@ -166,7 +170,8 @@ class PseudoDemoDataset(Dataset):
             M = m9.view(3, 3)
             tx = M[0, 2]
             ty = M[1, 2]
-            theta = torch.atan2(M[1, 0], M[0, 0])
+            # theta = torch.atan2(M[1, 0], M[0, 0])
+            theta = torch.atan2(M[0, 1], M[0, 0])          #
             return torch.stack([tx, ty, theta], dim=0)  # [3]
 
         num_action_sets = len(_clean_actions[0])
@@ -245,7 +250,8 @@ class PseudoDemoDataset(Dataset):
             M = m9.view(3, 3)
             tx = M[0, 2]
             ty = M[1, 2]
-            theta = torch.atan2(M[1, 0], M[0, 0])
+            # theta = torch.atan2(M[1, 0], M[0, 0])
+            theta = torch.atan2(M[0, 1], M[0, 0])          # CW 
             return torch.stack([tx, ty, theta], dim=0)  # [3]
 
         for b in range(B):
@@ -381,15 +387,25 @@ class PerNodeDenoisingMSELoss(nn.Module):
         cos_c, sin_c = torch.cos(th_c), torch.sin(th_c)
         cos_n, sin_n = torch.cos(th_n), torch.sin(th_n)
 
+        # R_c = torch.stack([
+        #     torch.stack([ cos_c, -sin_c], dim=-1),
+        #     torch.stack([ sin_c,  cos_c], dim=-1)
+        # ], dim=-2)  # [B,T,2,2]
+        # R_n = torch.stack([
+        #     torch.stack([ cos_n, -sin_n], dim=-1),
+        #     torch.stack([ sin_n,  cos_n], dim=-1)
+        # ], dim=-2)  # [B,T,2,2]
+
+
         R_c = torch.stack([
-            torch.stack([ cos_c, -sin_c], dim=-1),
-            torch.stack([ sin_c,  cos_c], dim=-1)
+            torch.stack([ cos_c, sin_c], dim=-1),
+            torch.stack([ -sin_c,  cos_c], dim=-1)
+        ], dim=-2)  # [B,T,2,2]
+        R_n = torch.stack([
+            torch.stack([ cos_n, sin_n], dim=-1),
+            torch.stack([ -sin_n,  cos_n], dim=-1)
         ], dim=-2)  # [B,T,2,2]
 
-        R_n = torch.stack([
-            torch.stack([ cos_n, -sin_n], dim=-1),
-            torch.stack([ sin_n,  cos_n], dim=-1)
-        ], dim=-2)  # [B,T,2,2]
 
         # Apply to keypoints
         # keypoints: [A,2] -> broadcast to [B,T,A,2]
@@ -460,7 +476,7 @@ class TrainConfig:
     train_geo_encoder = False
     biased_odds = 0.5
     augmented_odds = 0.1
-    num_demos_given = 4
+    num_demos_given = 2
 
 
 if __name__ == "__main__":
@@ -468,7 +484,7 @@ if __name__ == "__main__":
 
     
     cfg = TrainConfig()
-    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim)
+    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = 256)
     if cfg.train_geo_encoder:  
         geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, 
                                                     save_path=f"geometry_encoder_2d", num_epochs=100, num_samples=2000)

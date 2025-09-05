@@ -275,7 +275,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1
-            break # take first action only
+            # break # take first action only
     return won 
         
 
@@ -286,7 +286,7 @@ if __name__ == "__main__":
     import os 
 
     cfg = TrainConfig()
-    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim)
+    geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = 256)
 
     state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
     geometry_encoder.impl.load_state_dict(state)
@@ -316,16 +316,19 @@ if __name__ == "__main__":
     print('Start evaluating')
     num_rollouts = 10
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
-    # for objective in GameObjective:
-    wins = 0
-    objective = GameObjective.EAT_ALL
-    for _ in range(num_rollouts):
-        game_interface = GameInterface(
-            mode=GameMode.DEMO_MODE,
-            objective=objective
-        )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=10, refine =5))
-    print(f'Won {wins} / {num_rollouts} for {objective}')
+    for objective in GameObjective:
+        wins = 0
+        # objective = GameObjective.EAT_ALL
+        # objective = GameObjective.REACH_GOAL
+
+        for _ in range(num_rollouts):
+            game_interface = GameInterface(
+                mode=GameMode.DEMO_MODE,
+                objective=objective
+            )
+            wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=100, num_demos=2))
+
+        print(f'Won {wins} / {num_rollouts} for {objective}')
     
 
 
