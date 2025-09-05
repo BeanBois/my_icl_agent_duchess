@@ -476,7 +476,7 @@ class TrainConfig:
     train_geo_encoder = True
     biased_odds = 0.5
     augmented_odds = 0.1
-    num_demos_given = 2
+    num_demos_given = 4
     k_neighbours = 256
 
 if __name__ == "__main__":
