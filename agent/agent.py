@@ -126,7 +126,7 @@ class Agent(nn.Module):
         t_sched = torch.linspace(D - 1, 0, steps=steps + 1, device=device).round().long()  # [steps+1]
 
         # Start from current actions (interpreted as x_t); if you prefer pure noise, set actions ~ N
-        x_t = torch.cat([se2_log(actions[..., :3]), actions[..., 3:4]], dim=-1)  # [B,T,4]
+        x_t = torch.cat([self._se2_log_cw(actions[..., :3]), actions[..., 3:4]], dim=-1)  # [B,T,4]
 
         for s in range(steps):
             t      = t_sched[s].item()
@@ -137,20 +137,20 @@ class Agent(nn.Module):
             sqrt1m_t   = (1 - ab_t).clamp_min(1e-12).sqrt()
 
             # current noisy actions for conditioning
-            a_t = torch.cat([se2_exp(x_t[..., :3]), x_t[..., 3:4]], dim=-1)  # [B,T,4]
+            a_t = torch.cat([self._se2_exp_cw(x_t[..., :3]), x_t[..., 3:4]], dim=-1)  # [B,T,4]
 
             # one-step denoise to get a0_hat
             denoise = self.policy(curr_agent_info, curr_object_pos,
                                 demo_agent_info, demo_object_pos, a_t, mode='eval')      # [B,T,A,5]
             a0_hat  = self._svd_refine_once(a_t, denoise, keypoints)          # [B,T,4]
-            x0_hat  = torch.cat([se2_log(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
+            x0_hat  = torch.cat([self._se2_log_cw(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
 
             # ε̂ and DDIM update
             eps_hat = (x_t - sqrt_ab_t * x0_hat) / (sqrt1m_t + 1e-12)
             x_t     = ab_prev.sqrt() * x0_hat + (1 - ab_prev).clamp_min(1e-12).sqrt() * eps_hat
 
         # back to vector actions
-        a0 = se2_exp(x_t[..., :3])
+        a0 = self._se2_exp_cw(x_t[..., :3])
         s0 = x_t[..., 3:4].clamp(0.0, 1.0)
         out = torch.cat([a0, s0], dim=-1)
         out[..., 2] = _wrap_to_pi(out[..., 2])
@@ -182,7 +182,7 @@ class Agent(nn.Module):
 
         # --- go to tangent: x0 = log( SE2(transrot0) ) ---
         # x0: [B,T,3] (vx,vy,omega) representing the same SE(2) increment as (dx,dy,theta)
-        x0 = se2_log(transrot0)         # you already import se2_log
+        x0 = self._se2_log_cw(transrot0)         # you already import se2_log
 
         # --- sample epsilons ---
         eps_action = torch.randn(B,T,3, device=dev, dtype=dt)   # N(0,I) in se(2)
@@ -192,7 +192,7 @@ class Agent(nn.Module):
         x_t = sqrt_ab_t.unsqueeze(-1) * x0 + sqrt1m_abt.unsqueeze(-1) * eps_action  # [B,T,3]
 
         # --- map back to action space ---
-        transrot_t = se2_exp(x_t)        # [B,T,3] => (dx,dy,theta) at step t
+        transrot_t = self._se2_exp_cw(x_t)        # [B,T,3] => (dx,dy,theta) at step t
         # keep theta in (-pi,pi]
         transrot_t[...,2] = ((transrot_t[...,2] + torch.pi) % (2*torch.pi)) - torch.pi
 
@@ -202,85 +202,6 @@ class Agent(nn.Module):
 
         noisy_actions = torch.cat([transrot_t, state_t.unsqueeze(-1)], dim=-1)  # [B,T,4]
         return noisy_actions, eps_action, eps_state
-
-
-    def _actions_vect_to_SE2_flat(self, actions):
-        # (x,y,theta_rad,state) => SE(2).flatten() | state 
-        B, T, _ = actions.shape
-        device = actions.device 
-        dtype = actions.dtype 
-
-        dx = actions[..., 0]
-        dy = actions[..., 1]
-        th = actions[..., 2]
-        st = actions[..., 3]
-
-        c, s = torch.cos(th), torch.sin(th)
-        # T_clean: [B,T,3,3]
-        SE2 = torch.zeros(B, T, 3, 3, device=device, dtype=dtype)
-        SE2[..., 0, 0] = c
-        SE2[..., 0, 1] = -s
-        SE2[..., 1, 0] = s
-        SE2[..., 1, 1] = c
-        SE2[..., 0, 2] = dx
-        SE2[..., 1, 2] = dy
-        SE2[..., 2, 2] = 1.
-
-        SE2_flat = SE2.view(B,T,9)
-        SE2_flat_final = torch.concat([SE2_flat, st], dim = -1)
-        return SE2_flat_final
-
-    def _se2_exp(self, xi: torch.Tensor):
-        """
-        xi: [...,3] -> (vx,vy,omega)  (body-frame twist)
-        returns SE(2) matrix [...,3,3]
-        """
-        vx, vy, w = xi[...,0], xi[...,1], xi[...,2]
-        eps = 1e-6
-        sw, cw = torch.sin(w), torch.cos(w)
-        w_safe  = torch.where(torch.abs(w) < eps, torch.ones_like(w), w)
-        a = sw / w_safe
-        b = (1. - cw) / w_safe
-
-        # V @ v
-        tx = a*vx - b*vy
-        ty = b*vx + a*vy
-        tx = torch.where(torch.abs(w) < eps, vx, tx)
-        ty = torch.where(torch.abs(w) < eps, vy, ty)
-
-        T = torch.zeros(*xi.shape[:-1], 3, 3, dtype=xi.dtype, device=xi.device)
-        T[...,0,0] = cw;  T[...,0,1] = -sw; T[...,0,2] = tx
-        T[...,1,0] = sw;  T[...,1,1] =  cw; T[...,1,2] = ty
-        T[...,2,2] = 1.0
-        return T
-
-    def _se2_from_vec(self, vec: torch.Tensor):
-        """
-        vec: [...,3] -> (dx,dy,theta) to matrix
-        """
-        dx, dy, th = vec[...,0], vec[...,1], vec[...,2]
-        c, s = torch.cos(th), torch.sin(th)
-        T = torch.zeros(*vec.shape[:-1], 3, 3, dtype=vec.dtype, device=vec.device)
-        T[...,0,0] = c;  T[...,0,1] = -s; T[...,0,2] = dx
-        T[...,1,0] = s;  T[...,1,1] =  c; T[...,1,2] = dy
-        T[...,2,2] = 1.0
-        return T
-
-    def _se2_to_vec(self, T: torch.Tensor):
-        """
-        T: [...,3,3] -> (dx,dy,theta)
-        """
-        dx = T[...,0,2]
-        dy = T[...,1,2]
-        th = torch.atan2(T[...,1,0], T[...,0,0])
-        return torch.stack([dx,dy,th], dim=-1)
-
-    def _se2_compose(self, A: torch.Tensor, B: torch.Tensor):
-        """matrix compose with batch broadcasting: A @ B"""
-        return A @ B
-
-    def _betas_lookup(self, timesteps):
-        return self.betas[timesteps]
 
     def _unnormalise_denoising_directions(self, x, kp_norms):
         # scale translation + per-node disp by length; keep state as-is
@@ -309,8 +230,11 @@ class Agent(nn.Module):
 
         c = torch.cos(th); s = torch.sin(th)
         kx, ky = kp[..., 0], kp[..., 1]
-        Rx = c * kx - s * ky
-        Ry = s * kx + c * ky
+        Rx = c * kx + s * ky
+        Ry = - s * kx + c * ky
+
+        # Rx = c * kx - s * ky
+        # Ry = s * kx + c * ky
         P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)  # [B,T,A,2]
 
         # denoise split
@@ -340,7 +264,9 @@ class Agent(nn.Module):
         Sfix[..., 1, 1] = sign
         R = U @ Sfix @ Vh
 
-        dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
+        # dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
+        dtheta = torch.atan2(R[...,0,1], R[...,0,0]).unsqueeze(-1)   
+
         # translation t = muQ - R*muP
         Rp = torch.einsum('btij,btaj->btai', R, muP.expand_as(P))    # [B,T,A,2]
         t  = (muQ - Rp).mean(dim=2)                                   # [B,T,2]
@@ -349,3 +275,118 @@ class Agent(nn.Module):
         th_hat   = _wrap_to_pi(th.squeeze(-1) + dtheta.squeeze(-1)).unsqueeze(-1)
         s_hat    = (st + denoise[..., 4:5].mean(dim=2)).clamp(0.0, 1.0)
         return torch.cat([dxdy_hat, th_hat, s_hat], dim=-1)           # [B,T,4]
+
+    def _se2_log_cw(self, vec: torch.Tensor) -> torch.Tensor:
+        """
+        vec: [...,3] = (dx,dy,theta_CW)
+        returns twist xi_CW = (vx,vy,omega_CW)
+        Implemented by converting to CCW, calling se2_log (CCW), then converting back.
+        """
+        dx, dy, th_cw = vec[..., 0], vec[..., 1], vec[..., 2]
+        vec_ccw = torch.stack([dx, dy, -th_cw], dim=-1)
+        xi_ccw = se2_log(vec_ccw)           # your existing utility (CCW)
+        vx, vy, om_ccw = xi_ccw[..., 0], xi_ccw[..., 1], xi_ccw[..., 2]
+        xi_cw = torch.stack([vx, vy, -om_ccw], dim=-1)
+        return xi_cw
+
+    def _se2_exp_cw(self, xi: torch.Tensor) -> torch.Tensor:
+        """
+        xi: [...,3] = (vx,vy,omega_CW)
+        returns vec: (dx,dy,theta_CW)
+        Implemented via CCW exp + conversion.
+        """
+        vx, vy, om_cw = xi[..., 0], xi[..., 1], xi[..., 2]
+        xi_ccw = torch.stack([vx, vy, -om_cw], dim=-1)
+        vec_ccw = se2_exp(xi_ccw)           # your existing utility (CCW)
+        dx, dy, th_ccw = vec_ccw[..., 0], vec_ccw[..., 1], vec_ccw[..., 2]
+        vec_cw = torch.stack([dx, dy, -th_ccw], dim=-1)
+        return vec_cw
+
+    # def _actions_vect_to_SE2_flat(self, actions):
+    #     # (x,y,theta_rad,state) => SE(2).flatten() | state 
+    #     B, T, _ = actions.shape
+    #     device = actions.device 
+    #     dtype = actions.dtype 
+
+    #     dx = actions[..., 0]
+    #     dy = actions[..., 1]
+    #     th = actions[..., 2]
+    #     st = actions[..., 3]
+
+    #     c, s = torch.cos(th), torch.sin(th)
+    #     # T_clean: [B,T,3,3]
+    #     SE2 = torch.zeros(B, T, 3, 3, device=device, dtype=dtype)
+    #     SE2[..., 0, 0] = c
+    #     SE2[..., 0, 1] = -s
+    #     SE2[..., 1, 0] = s
+    #     SE2[..., 1, 1] = c
+    #     SE2[..., 0, 2] = dx
+    #     SE2[..., 1, 2] = dy
+    #     SE2[..., 2, 2] = 1.
+
+    #     SE2_flat = SE2.view(B,T,9)
+    #     SE2_flat_final = torch.concat([SE2_flat, st], dim = -1)
+    #     return SE2_flat_final
+
+    # def _se2_exp(self, xi: torch.Tensor):
+    #     # """
+    #     # xi: [...,3] -> (vx,vy,omega)  (body-frame twist)
+    #     # returns SE(2) matrix [...,3,3]
+    #     # """
+    #     # vx, vy, w = xi[...,0], xi[...,1], xi[...,2]
+    #     # eps = 1e-6
+    #     # sw, cw = torch.sin(w), torch.cos(w)
+    #     # w_safe  = torch.where(torch.abs(w) < eps, torch.ones_like(w), w)
+    #     # a = sw / w_safe
+    #     # b = (1. - cw) / w_safe
+
+    #     # # V @ v
+    #     # tx = a*vx - b*vy
+    #     # ty = b*vx + a*vy
+    #     # tx = torch.where(torch.abs(w) < eps, vx, tx)
+    #     # ty = torch.where(torch.abs(w) < eps, vy, ty)
+
+    #     # T = torch.zeros(*xi.shape[:-1], 3, 3, dtype=xi.dtype, device=xi.device)
+    #     # T[...,0,0] = cw;  T[...,0,1] = -sw; T[...,0,2] = tx
+    #     # T[...,1,0] = sw;  T[...,1,1] =  cw; T[...,1,2] = ty
+    #     # T[...,2,2] = 1.0
+    #     # return T
+    #     """
+    #     xi: [...,3] = (vx,vy,omega_CW)
+    #     returns vec: (dx,dy,theta_CW)
+    #     Implemented via CCW exp + conversion.
+    #     """
+    #     vx, vy, om_cw = xi[..., 0], xi[..., 1], xi[..., 2]
+    #     xi_ccw = torch.stack([vx, vy, -om_cw], dim=-1)
+    #     vec_ccw = se2_exp(xi_ccw)           # your existing utility (CCW)
+    #     dx, dy, th_ccw = vec_ccw[..., 0], vec_ccw[..., 1], vec_ccw[..., 2]
+    #     vec_cw = torch.stack([dx, dy, -th_ccw], dim=-1)
+    #     return vec_cw
+
+    # def _se2_from_vec(self, vec: torch.Tensor):
+    #     """
+    #     vec: [...,3] -> (dx,dy,theta) to matrix
+    #     """
+    #     dx, dy, th = vec[...,0], vec[...,1], vec[...,2]
+    #     c, s = torch.cos(th), torch.sin(th)
+    #     T = torch.zeros(*vec.shape[:-1], 3, 3, dtype=vec.dtype, device=vec.device)
+    #     T[...,0,0] = c;  T[...,0,1] = -s; T[...,0,2] = dx
+    #     T[...,1,0] = s;  T[...,1,1] =  c; T[...,1,2] = dy
+    #     T[...,2,2] = 1.0
+    #     return T
+
+    # def _se2_to_vec(self, T: torch.Tensor):
+    #     """
+    #     T: [...,3,3] -> (dx,dy,theta)
+    #     """
+    #     dx = T[...,0,2]
+    #     dy = T[...,1,2]
+    #     th = torch.atan2(T[...,1,0], T[...,0,0])
+    #     return torch.stack([dx,dy,th], dim=-1)
+
+    # def _se2_compose(self, A: torch.Tensor, B: torch.Tensor):
+    #     """matrix compose with batch broadcasting: A @ B"""
+    #     return A @ B
+
+    # def _betas_lookup(self, timesteps):
+    #     return self.betas[timesteps]
