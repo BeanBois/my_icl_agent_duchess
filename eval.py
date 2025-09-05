@@ -275,7 +275,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1
-            # break # take first action only
+            break # take first action only
     return won 
         
 
@@ -326,7 +326,7 @@ if __name__ == "__main__":
                 mode=GameMode.DEMO_MODE,
                 objective=objective
             )
-            wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=100, num_demos=2))
+            wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=10, num_demos=2))
 
         print(f'Won {wins} / {num_rollouts} for {objective}')
     
