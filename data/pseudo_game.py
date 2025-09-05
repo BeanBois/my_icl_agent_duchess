@@ -296,7 +296,6 @@ class PseudoGame:
         action = Action(forward_movement=forward_cmd, rotation_deg=rotation_cmd, state_change=state_change)
         self.player.move_with_action(action)
         self.actions.append(action)
-        print(action.as_vector('deg'))
 
         px2, py2 = map(float, self.player.get_pos())
         if int(np.hypot(target[0] - px2, target[1] - py2)) <= WAYPOINT_THRESHOLD:
@@ -312,7 +311,7 @@ class PseudoGame:
         #     self.object.eaten = True 
         return 
     
-    def draw(self, plot = True):
+    def draw(self, plot = False):
         self.screen[:,:] = WHITE
 
         self.screen = self.player.draw(self.screen, self.screen_height)
