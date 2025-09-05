@@ -78,8 +78,8 @@ class PseudoPlayer:
 
         
         # Keep player within screen bounds
-        # self.x = max(self.size, min(self.screen_width - self.size, self.x))
-        # self.y = max(self.size, min(self.screen_height - self.size, self.y))
+        self.x = max(self.size, min(self.screen_width - self.size, self.x))
+        self.y = max(self.size, min(self.screen_height - self.size, self.y))
 
     def move_backward(self):
         rad = math.radians(self.angle)
@@ -88,8 +88,8 @@ class PseudoPlayer:
         self.x = int(self.x)
         self.y = int(self.y)
         # Keep player within screen bounds
-        # self.x = max(self.size, min(self.screen_width - self.size, int(self.x)))
-        # self.y = max(self.size, min(self.screen_height - self.size, int(self.y)))
+        self.x = max(self.size, min(self.screen_width - self.size, int(self.x)))
+        self.y = max(self.size, min(self.screen_height - self.size, int(self.y)))
 
     def rotate_left(self):
         self.angle -= self.rotation_speed
@@ -129,6 +129,9 @@ class PseudoPlayer:
         self.x = int(self.x  + movement_vector[0] * np.cos(theta_angle))
         self.y =int(self.y +  movement_vector[0] * np.sin(theta_angle))
 
+        self.x = max(self.size, min(self.screen_width - self.size, int(self.x)))
+        self.y = max(self.size, min(self.screen_height - self.size, int(self.y)))
+        
         if state_change_action is not None and state_change_action != self.state: #here state change action will be represented by PlayerState
             self.alternate_state()
 
