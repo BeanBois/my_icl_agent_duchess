@@ -434,7 +434,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-6
     weight_decay: float = 1e-4
-    max_steps: int = 2000000
+    max_steps: int = 10000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -449,8 +449,8 @@ class TrainConfig:
     tau=0.5
     pred_horizon = 5
     demo_length = 20
-    max_translation = 200
-    max_rotation = 180
+    max_translation = 100
+    max_rotation = 100
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
@@ -460,6 +460,7 @@ class TrainConfig:
     train_geo_encoder = False
     biased_odds = 0.5
     augmented_odds = 0.1
+    num_demos_given = 2
 
 
 if __name__ == "__main__":
@@ -478,7 +479,7 @@ if __name__ == "__main__":
     
 
     # --- Data
-    ds = PseudoDemoDataset(biased_odds=cfg.biased_odds, augmented_odds=cfg.augmented_odds, B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = cfg.num_chosen_pc)
+    ds = PseudoDemoDataset(biased_odds=cfg.biased_odds, augmented_odds=cfg.augmented_odds, B=cfg.batch_size, T=cfg.pred_horizon, L = cfg.demo_length, M = cfg.num_chosen_pc, N = cfg.num_demos_given)
     dl = DataLoader(ds, batch_size=cfg.batch_size, shuffle=True, collate_fn=collate_items, num_workers=0)
 
     # --- Model
