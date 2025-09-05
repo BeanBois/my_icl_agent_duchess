@@ -4,6 +4,7 @@ import math
 import random 
 from typing import List
 import matplotlib.pyplot as plt
+import numpy as np 
 
 def is_obstacle_blocking(player_pos, goal_center, obst_center, obst_width, obst_height):
     # Vector from player to goal
@@ -84,6 +85,33 @@ def build_interpolated_plan(waypoints: np.ndarray, step_px: float):
     plan = np.column_stack([path_xy, state_line])
     return plan.astype(np.int32)
 
+
+def signed_heading_error_deg(theta_deg, px, py, tx, ty):
+    """
+    theta_deg: current heading where 0°=east, +CW (your convention)
+    (px,py):  current position in *screen coords*  (y down)
+    (tx,ty):  target position in *screen coords*   (y down)
+    returns:  smallest signed angle error in degrees, where + means "rotate CW"
+    """
+    # current heading unit vector in *screen* coords (y down)
+    th = np.deg2rad(theta_deg)
+    hx, hy = np.cos(th), np.sin(th)  # matches your move: x+=cos, y+=sin
+
+    # target direction unit vector in *screen* coords
+    dx, dy = (tx - px), (ty - py)
+    n = np.hypot(dx, dy)
+    if n < 1e-6:
+        return 0.0
+    txu, tyu = dx / n, dy / n
+
+    # signed angle from heading->target:
+    # +atan2(cross, dot). With y-down, this yields + for CW rotations
+    cross = hx * tyu - hy * txu   # z-component of 2D cross
+    dot   = hx * txu + hy * tyu
+    err_rad = np.arctan2(cross, dot)   # in radians
+    err_deg = np.degrees(err_rad)      # range (-180, 180]
+
+    return float(err_deg)
 
 class PseudoGame:
     agent_keypoints = PseudoPlayer(100,100).get_keypoints(frame='self')
@@ -244,10 +272,17 @@ class PseudoGame:
                 self.done = True
             return
 
-        goal_bearing = float(np.degrees(np.arctan2(dy, dx)))
-        err = goal_bearing - theta_deg
-        while err > 180.0:  err -= 360.0
-        while err < -180.0: err += 360.0
+        # goal_bearing = float(np.degrees(np.arctan2(dy, dx)))
+        # err = goal_bearing - theta_deg
+        # while err > 180.0:  err -= 360.0
+        # while err < -180.0: err += 360.0
+        # Use screen/pygame convention: y increases DOWN.
+        # Convert to a CW-bearing so it matches theta_deg (0=East, +CW).
+        # goal_bearing_ccw = float(np.degrees(np.arctan2(dy, dx)))   # CCW, y-up
+        # goal_bearing_cw  = -goal_bearing_ccw                       # flip sign → CW
+        # err = ((goal_bearing_cw - theta_deg + 180) % 360) - 180    # wrap to [-180,180]
+
+        err = signed_heading_error_deg(theta_deg, px, py, target[0], target[1])
         if abs(err) > HEADING_DEADBAND:
             rotation_cmd = float(np.clip(err, -MAX_ROTATION, MAX_ROTATION))
             action = Action(forward_movement=0.0, rotation_deg=rotation_cmd, state_change=state_change)
@@ -261,6 +296,7 @@ class PseudoGame:
         action = Action(forward_movement=forward_cmd, rotation_deg=rotation_cmd, state_change=state_change)
         self.player.move_with_action(action)
         self.actions.append(action)
+        print(action.as_vector('deg'))
 
         px2, py2 = map(float, self.player.get_pos())
         if int(np.hypot(target[0] - px2, target[1] - py2)) <= WAYPOINT_THRESHOLD:
@@ -276,7 +312,7 @@ class PseudoGame:
         #     self.object.eaten = True 
         return 
     
-    def draw(self, plot = False):
+    def draw(self, plot = True):
         self.screen[:,:] = WHITE
 
         self.screen = self.player.draw(self.screen, self.screen_height)
