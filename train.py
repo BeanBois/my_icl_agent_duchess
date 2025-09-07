@@ -456,8 +456,9 @@ class TrainConfig:
     out_dir: str = "./checkpoints"
     grad_clip: float = 1.0
     amp: bool = True
+
+    #agent params
     hyp_curvature: float = 1.0
-    num_sampled_pc = 8
     num_att_heads = 8
     euc_head_dim = 32
     hyp_dim = 2
@@ -470,14 +471,19 @@ class TrainConfig:
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
-    num_chosen_pc = 512
 
-    # flags
-    train_geo_encoder = False
+    # pseudo-demo configs
+    num_demos_given = 2
     biased_odds = 0.5
     augmented_odds = 0.1
-    num_demos_given = 4
-    k_neighbours = 256
+
+    # geometry encoder configs
+    num_sampled_pc = 8
+    num_chosen_pc = 128 # downsample original set of point clouds
+    train_geo_encoder = True
+    k_neighbours = 8
+    geo_num_samples = 1000
+    geo_num_epochs = 50
 
 if __name__ == "__main__":
     from agent import GeometryEncoder, fulltrain_geo_enc2d
@@ -487,7 +493,7 @@ if __name__ == "__main__":
     geometry_encoder = GeometryEncoder(M = cfg.num_sampled_pc, out_dim=cfg.num_att_heads * cfg.euc_head_dim, k = cfg.k_neighbours)
     if cfg.train_geo_encoder:  
         geometry_encoder.impl = fulltrain_geo_enc2d(feat_dim=cfg.num_att_heads * cfg.euc_head_dim, num_sampled_pc= cfg.num_sampled_pc, 
-                                                    save_path=f"geometry_encoder_2d", num_epochs=50, num_samples=1000, k_neighbours=cfg.k_neighbours)
+                                                    save_path=f"geometry_encoder_2d", num_epochs=cfg.geo_num_epochs, num_samples=cfg.geo_num_samples, k_neighbours=cfg.k_neighbours)
     else:
         state = torch.load("geometry_encoder_2d_frozen.pth", map_location="cpu")
         geometry_encoder.impl.load_state_dict(state) # remove encoder later
