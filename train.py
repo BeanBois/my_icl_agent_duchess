@@ -450,7 +450,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-6
     weight_decay: float = 1e-4
-    max_steps: int = 10000
+    max_steps: int = 20000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -478,6 +478,7 @@ class TrainConfig:
     augmented_odds = 0.1
     num_demos_given = 4
     k_neighbours = 256
+    continue_training = True
 
 if __name__ == "__main__":
     from agent import GeometryEncoder, fulltrain_geo_enc2d
@@ -514,7 +515,11 @@ if __name__ == "__main__":
         tau=cfg.tau
 
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
-
+    _offset = 0 
+    if cfg.continue_training:
+            agent_state_dict = torch.load('agent.pth', map_location="cpu")
+            agent.load_state_dict(agent_state_dict['model'])
+            _offset = 42000 # update this!
     # --- Losses
     pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale = cfg.max_rotation, reduction='sum')
 
@@ -593,7 +598,7 @@ if __name__ == "__main__":
                     "optim": optim.state_dict(),
                     "cfg": cfg.__dict__,
                 }
-                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pth")
+                path = os.path.join(cfg.out_dir, f"ckpt_{(step + _offset):07d}.pth")
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
 
