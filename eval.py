@@ -233,13 +233,17 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
 def action_from_vec(action): #x,y,theta,state_change [4] vector 
     action = action
     state_action = None 
+    theta = action[2]
+    heading = torch.tensor([math.cos(theta), math.sin(theta)])  # from agent orientation
+    forward_movement = float(action[0] * heading[0] + action[1] * heading[1])
+
     for state in PlayerState:
         if round(torch.clamp(action[-1],0,1).item()) == state.value:
             state_action = state
             break 
     action_obj = Action(
-        forward_movement = int(math.sqrt(action[0]**2 + action[1]**2)),
-        rotation_deg = torch.rad2deg(action[2]),
+        forward_movement = forward_movement,
+        rotation_deg = torch.rad2deg(theta),
         state_change = state_action
     )
     return action_obj 
@@ -316,19 +320,19 @@ if __name__ == "__main__":
     print('Start evaluating')
     num_rollouts = 10
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
-    for objective in GameObjective:
-        wins = 0
-        # objective = GameObjective.EAT_ALL
-        # objective = GameObjective.REACH_GOAL
+    # for objective in GameObjective:
+    wins = 0
+    # objective = GameObjective.EAT_ALL
+    objective = GameObjective.REACH_GOAL
 
-        for _ in range(num_rollouts):
-            game_interface = GameInterface(
-                mode=GameMode.DEMO_MODE,
-                objective=objective
-            )
-            wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=10, num_demos=2))
+    for _ in range(num_rollouts):
+        game_interface = GameInterface(
+            mode=GameMode.DEMO_MODE,
+            objective=objective
+        )
+        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=100, num_demos=2))
 
-        print(f'Won {wins} / {num_rollouts} for {objective}')
+    print(f'Won {wins} / {num_rollouts} for {objective}')
     
 
 

@@ -450,7 +450,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-6
     weight_decay: float = 1e-4
-    max_steps: int = 10000
+    max_steps: int = 20000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -471,7 +471,8 @@ class TrainConfig:
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
-
+    continue_training = True
+    
     # pseudo-demo configs
     num_demos_given = 2
     biased_odds = 0.5
@@ -520,7 +521,11 @@ if __name__ == "__main__":
         tau=cfg.tau
 
     ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
-
+    _offset = 0 
+    if cfg.continue_training:
+            agent_state_dict = torch.load('agent.pth', map_location="cpu")
+            agent.load_state_dict(agent_state_dict['model'])
+            _offset = 42000 # update this!
     # --- Losses
     pnn_loss = PerNodeDenoisingMSELoss(pos_scale=cfg.max_translation, rot_scale = cfg.max_rotation, reduction='sum')
 
@@ -599,7 +604,7 @@ if __name__ == "__main__":
                     "optim": optim.state_dict(),
                     "cfg": cfg.__dict__,
                 }
-                path = os.path.join(cfg.out_dir, f"ckpt_{step:07d}.pth")
+                path = os.path.join(cfg.out_dir, f"ckpt_{(step + _offset):07d}.pth")
                 torch.save(ckpt, path)
                 print(f"Saved checkpoint to {path}")
 
