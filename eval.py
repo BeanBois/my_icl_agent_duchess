@@ -230,23 +230,57 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
 
     return demo_agent_info, demo_object_pos
 
-def action_from_vec(action): #x,y,theta,state_change [4] vector 
-    action = action
-    state_action = None 
-    theta = action[2]
-    heading = torch.tensor([math.cos(theta), math.sin(theta)])  # from agent orientation
-    forward_movement = float(action[0] * heading[0] + action[1] * heading[1])
 
-    for state in PlayerState:
-        if round(torch.clamp(action[-1],0,1).item()) == state.value:
-            state_action = state
-            break 
-    action_obj = Action(
-        forward_movement = forward_movement,
-        rotation_deg = torch.rad2deg(theta),
-        state_change = state_action
+def action_from_vec(action, theta_deg, state_action=None):
+    """
+    action: [tx, ty, dtheta, (optional: ...)]
+        tx, ty are CLEAN translations in IMAGE coords (x right, y DOWN)
+        dtheta is rotation in RADIANS (positive = CCW)
+    theta_deg: agent's absolute heading at time t (degrees, CCW-positive)
+    state_action: your PlayerState (or None)
+
+    Returns an Action with signed forward_movement in the agent's frame.
+    """
+    tx = float(action[0])
+    ty = float(action[1])
+    dtheta = float(action[2])
+
+    # Convert heading to radians (CCW-positive)
+    th = math.radians(float(theta_deg))
+    c, s = math.cos(th), math.sin(th)
+
+    # Image y-down -> world y-up
+    dy_world = -ty
+    dx_world = tx
+
+    # Project world translation onto body frame (forward = +x_body, left = +y_body)
+    s_forward = dx_world * c + dy_world * s          # signed forward/backward
+    s_lateral = -dx_world * s + dy_world * c         # signed left/right (optional)
+
+    return Action(
+        forward_movement = s_forward,                 # keep the sign!
+        rotation_deg     = math.degrees(dtheta),
+        state_change     = state_action
+        # If you support strafing, add: lateral_movement = s_lateral
     )
-    return action_obj 
+
+# def action_from_vec(action): #x,y,theta,state_change [4] vector 
+#     action = action
+#     state_action = None 
+#     theta = action[2]
+#     heading = torch.tensor([math.cos(theta), math.sin(theta)])  # from agent orientation
+#     forward_movement = float(action[0] * heading[0] + action[1] * heading[1])
+
+#     for state in PlayerState:
+#         if round(torch.clamp(action[-1],0,1).item()) == state.value:
+#             state_action = state
+#             break 
+#     action_obj = Action(
+#         forward_movement = forward_movement,
+#         rotation_deg = torch.rad2deg(theta),
+#         state_change = state_action
+#     )
+#     return action_obj 
 
 def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20, 
                 max_iter = 100, refine=10, keypoints=AGENT_KEYPOINTS, manual = True):
@@ -271,8 +305,9 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
             K = refine,
             keypoints = keypoints
         )  # [B,T,4]
-        for a0 in actions[0]: 
-            action_obj = action_from_vec(a0)
+        agent_orientation = curr_agent_info[0,0,2]
+        for a0, agent_orientation in zip(actions[0], agent_orientation): 
+            action_obj = action_from_vec(a0, agent_orientation)
             curr_obs = game_interface.step(action_obj)
             done = curr_obs['done']
             if done:
