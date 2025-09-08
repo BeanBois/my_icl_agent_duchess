@@ -95,6 +95,21 @@ class Player:
         return pygame.Rect(self.x - self.size, self.y - self.size, 
                           self.size * 2, self.size * 2)
     
+    def move_with_prediction(self, pred):
+        self.x += pred[0]
+        self.y += pred[1]
+        self.x = max(self.size, min(self.screen_width - self.size, self.x))
+        self.y = max(self.size, min(self.screen_height - self.size, self.y))
+
+        theta_deg = math.degrees(pred[2])
+        self.angle += theta_deg
+        self.angle %= 360 
+
+        for state in PlayerState:
+            if round(np.clip(pred[-1],0,1).item()) == state.value:
+                self.state = state
+                break 
+        return
 
     def move_with_action(self,action : Action):
         # action is ROTATION @ TRANSLATION, SO A 2X2 matrix 

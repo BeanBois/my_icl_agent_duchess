@@ -472,7 +472,7 @@ class TrainConfig:
     beta_start = 1e-4
     beta_end = 0.02
     continue_training = True
-    offset = 10000
+    offset =112000
     
     # pseudo-demo configs
     num_demos_given = 2

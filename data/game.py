@@ -104,12 +104,14 @@ class Game:
                 
         return True
 
-    def handle_action(self,action : Action):
+    def handle_action(self,action ):
         if self.game_over or self.game_won:
             return False
         
-        # Handle continuous key presses
-        self.player.move_with_action(action)
+        if type(action) is Action:
+            self.player.move_with_action(action)
+        else:
+            self.player.move_with_prediction(action)
         return True
   
     def update(self):

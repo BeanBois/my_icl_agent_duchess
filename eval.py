@@ -279,7 +279,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1
-            break # take first action only
+            # break # take first action only
     return won 
         
 
@@ -320,19 +320,19 @@ if __name__ == "__main__":
     print('Start evaluating')
     num_rollouts = 10
     kp = torch.tensor(AGENT_KEYPOINTS, device = cfg.device)
-    # for objective in GameObjective:
-    wins = 0
-    # objective = GameObjective.EAT_ALL
-    objective = GameObjective.REACH_GOAL
+    for objective in GameObjective:
+        wins = 0
+        # objective = GameObjective.EAT_ALL
+        # objective = GameObjective.REACH_GOAL
 
-    for _ in range(num_rollouts):
-        game_interface = GameInterface(
-            mode=GameMode.DEMO_MODE,
-            objective=objective
-        )
-        wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=100, num_demos=2))
+        for _ in range(num_rollouts):
+            game_interface = GameInterface(
+                mode=GameMode.DEMO_MODE,
+                objective=objective
+            )
+            wins += int(rollout_once(game_interface, agent, keypoints=kp,manual=False,max_iter=20, refine=1000, num_demos=2))
 
-    print(f'Won {wins} / {num_rollouts} for {objective}')
+        print(f'Won {wins} / {num_rollouts} for {objective}')
     
 
 
