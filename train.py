@@ -25,7 +25,6 @@ class Item:
     demo_agent_info: torch.Tensor       # [B, N, L, A, 6]
     demo_object_pos: torch.Tensor       # [B, N, L, M, 2]
     demo_agent_action: torch.Tensor     # [B, N, L-1, 3]
-
     demo_time: Optional[torch.Tensor] = None  # [B, N, L] monotonically increasing
     curr_time: Optional[torch.Tensor] = None  # [B] or [B, A] if per-node
  
