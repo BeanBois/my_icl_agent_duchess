@@ -471,8 +471,8 @@ class TrainConfig:
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
-    continue_training = False
-    offset = 0
+    continue_training = True
+    offset = 10000
     
     # pseudo-demo configs
     num_demos_given = 2
