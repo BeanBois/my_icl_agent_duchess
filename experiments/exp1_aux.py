@@ -1,48 +1,4 @@
 # From chatgpt 
-"""
-sequence_probes_y_down.py
-
-Run *both* probes on action-sequence embeddings from a frozen DemoHandler,
-with targets tokenised from **y-down** (image) coordinates.
-
-Probes:
-  A) Sequence Retrieval (global fingerprint): NN under Poincaré distance
-  B) Next-Token Probe (local context): linear classifier on log-map embeddings at token boundaries
-
-Usage sketch (pseudo, see __main__ for a stub):
-  from demo_handler import DemoHandler
-  handler = DemoHandler(...); handler.load_state_dict(...); handler.eval()
-  runner = SequenceProbes(handler, curvature=1.0, device="cuda")
-
-  # Prepare your rollouts list (per rollout dict: x, y (image coords), theta_rad, state, done)
-  # Each is a 1D numpy array of length L
-  rollouts = [ {...}, {...}, ... ]
-
-  # Auto-calibrate thresholds from your rollouts, then tokenise and embed:
-  params = runner.autocalibrate_from_rollouts(rollouts)
-  dataset = runner.build_dataset(rollouts, params, prefer_last_step=False)
-
-  # Split by base sequence ID (unique token string)
-  splits = split_by_base_id(dataset, train_frac=0.7, val_frac=0.15, seed=0)
-
-  # Retrieval:
-  refs = build_references(splits["train"]["z_rollout"], splits["train"]["base_id"], curvature=runner.c)
-  acc1 = topk_retrieval_acc(splits["test"]["z_rollout"], splits["test"]["base_id"], *refs, k=1, curvature=runner.c)
-
-  # Next-token probe:
-  probe, val_acc = train_linear_probe(
-      splits["train"]["Zp"], splits["train"]["y_next"],
-      splits["val"]["Zp"],   splits["val"]["y_next"],
-      K=runner.vocab_size(), curvature=runner.c)
-
-Notes
------
-- Y-down adaptation: pass image-row deltas directly; tokeniser uses y_down=True by default.
-  "N" means UP on the screen (negative dy), "S" means DOWN (positive dy).
-- This module never trains the encoder; it freezes and probes representations.
-- Requires demo_handler.py in the same directory (uses its log0/exp0 implementations).
-"""
-
 from __future__ import annotations
 import os, sys, math, random
 from dataclasses import dataclass
@@ -55,9 +11,8 @@ import torch.nn as nn
 HERE = os.path.abspath(os.path.dirname(__file__))
 if HERE not in sys.path: sys.path.insert(0, HERE)
 
-# Import Poincaré ops from user's demo_handler to ensure consistency
 try:
-    from agent import log0 as poincare_log0, exp0 as poincare_exp0
+    from utilities import logmap0 as poincare_log0, expmap0 as poincare_exp0
 except Exception as e:
     raise RuntimeError("Could not import log0/exp0 from demo_handler.py. "
                        "Make sure demo_handler.py is in the same folder.") from e
@@ -69,8 +24,8 @@ except Exception as e:
 
 @dataclass
 class TokeniserParams:
-    move_thresh: float        # τ_move (pixels per step)
-    rot_thresh_deg: float     # τ_theta (degrees per step)
+    move_thresh: float        # tau_move (pixels per step)
+    rot_thresh_deg: float     # tau_theta (degrees per step)
     hysteresis_deg: float = 10.0
     n_dirs: int = 8
     prefer_translation: bool = True  # when both move/rot exceed thresholds, prefer direction
@@ -121,7 +76,7 @@ def auto_calibrate_thresholds_y_down(
     deltas_xy_y_down: np.ndarray, dtheta_rad: np.ndarray
 ) -> Tuple[float, float]:
     """
-    Compute thresholds τ_move and τ_theta from y-down deltas.
+    Compute thresholds tau_move and tau_theta from y-down deltas.
     We use robust quantiles to separate jitter from true motion/rotation.
     """
     # Convert to world-up just for magnitude estimation
@@ -203,7 +158,7 @@ class DemoEmbeddingsAdapter:
     Wraps frozen DemoHandler to output time-series embeddings [L, dh],
     a single rollout embedding [dh], and prefix embeddings at token boundaries.
     Assumes handler.forward expects [B,N,L,A,6] with fields (x, y, theta, state, time, done)
-    in **y-down** coordinates (image frame) as per user's implementation.
+    in **y-down** coordinates (image frame).
     """
     def __init__(self, demo_handler: torch.nn.Module, curvature: Optional[float] = None, device: str = "cpu"):
         self.h = demo_handler.to(device).eval()
@@ -278,14 +233,14 @@ def d_poincare(x: torch.Tensor, Y: torch.Tensor, curvature: float = 1.0, eps: fl
 
 @torch.no_grad()
 def frechet_mean_poincare(Z_ball: torch.Tensor, curvature: float = 1.0) -> torch.Tensor:
-    """Tangent mean at origin (log0 → mean → exp0), consistent with user's ops."""
+    """Tangent mean at origin (log0 → mean → exp0)"""
     V = poincare_log0(Z_ball, c=curvature).mean(0, keepdim=True)
     return poincare_exp0(V, c=curvature).squeeze(0)
 
 @torch.no_grad()
 def build_references(z_rollout: torch.Tensor, base_ids: List[str], curvature: float = 1.0) -> Tuple[torch.Tensor, List[str]]:
     """
-    Groups rollout embeddings by base sequence ID and returns Fréchet means per ID.
+    Groups rollout embeddings by base sequence ID and returns Karcher means per ID.
     z_rollout: [N, dh] on Poincaré ball
     base_ids:  list[str], length N
     """
@@ -365,7 +320,7 @@ def build_demo_agent_info_y_down(
 ) -> torch.Tensor:
     """
     Assemble [1,1,L,A,6] tensor for DemoHandler forward. Image (y-down) coords expected.
-    theta_rad: heading, +CCW in radians. (Use your env convention.)
+    theta_rad: heading, +CCW in radians. 
     state: optional int/float flags; defaults to zeros.
     done:  optional 0/1 flags; defaults to zeros with last=1.
     time_norm: 'index' (0..L-1), or 'lin' (0..1)
@@ -382,16 +337,13 @@ def build_demo_agent_info_y_down(
 
     # Build [L, A, 6] for A agents; we populate agent 0 as per user's handler
     arr = np.zeros((L, A, 6), dtype=np.float32)
-    arr[:, 0, 0] = theta_rad           # field 0 = theta in user's code snippet? (They used [...,0,2] for theta)
-    arr[:, 0, 1] = state               # field 1 = state
-    arr[:, 0, 2] = x_img               # field 2 = x (y-down frame)
-    arr[:, 0, 3] = y_img               # field 3 = y (y-down frame)
+    arr[:, 0, 0] = x_img               # field 0 = x (y-down frame)
+    arr[:, 0, 1] = y_img               # field 1 = y (y-down frame)
+    arr[:, 0, 2] = theta_rad           # field 2 = theta in user's code snippet? (They used [...,0,2] for theta)
+    arr[:, 0, 3] = state               # field 3 = state
     arr[:, 0, 4] = t                   # field 4 = time
     arr[:, 0, 5] = done                # field 5 = done
-    # WARNING: If your handler expects a different ordering (x,y,theta,state,time,done), adjust here.
-    # The user's inline comment suggested order (x, y, theta, state, time, done).
-    # If that's the case, swap as needed:
-    # arr[:,0,0] = x_img; arr[:,0,1] = y_img; arr[:,0,2] = theta_rad; arr[:,0,3] = state; arr[:,0,4] = t; arr[:,0,5] = done
+
 
     return torch.from_numpy(arr).unsqueeze(0).unsqueeze(0)  # [1,1,L,A,6]
 
@@ -438,7 +390,8 @@ class SequenceProbes:
         deltas_xy = np.concatenate(all_dxdy, axis=0)
         dtheta    = np.concatenate(all_dth, axis=0)
         tau_move, tau_theta = auto_calibrate_thresholds_y_down(deltas_xy, dtheta)
-        return TokeniserParams(move_thresh=tau_move, rot_thresh_deg=tau_theta, hysteresis_deg=10.0)
+        # return TokeniserParams(move_thresh=tau_move, rot_thresh_deg=tau_theta, hysteresis_deg=10.0)
+        return TokeniserParams(move_thresh=20, rot_thresh_deg=20, hysteresis_deg=10)
 
     def build_dataset(
         self, rollouts: List[Dict], params: TokeniserParams, prefer_last_step: bool = False
@@ -530,7 +483,7 @@ def split_by_base_id(dataset: Dict[str, List], train_frac=0.7, val_frac=0.15, se
             else:
                 out[k] = [v[i] for i in idx]
         # For Zp/y_next, rebuild from the original per-rollout structures if available
-        # (In this simplified splitter, we just return the full concatenated Zp/y_next and warn users to build probes from matching indices.)
+
         return out
 
     # To keep it simple, we will also create index arrays and rebuild Zp/y_next properly:
@@ -573,10 +526,9 @@ from torch.utils.data import Dataset
 
 
 
-
+@dataclass
 class Experiment1Item:
-    # Shapes must match your policy.forward signature
-    demo_agent_info: torch.Tensor       # [B, N, L, A, 6]
+    demo_agent_info: torch.Tensor       # [B, N, L, A, 6] (x,y,theta,state,time,done)
 
 
  
@@ -606,7 +558,7 @@ class Experiment1Dataset(Dataset):
         demo_agent_info, _, _ = self._process_context(context)
     
         return Experiment1Item(
-            demo_agent_info
+            demo_agent_info = demo_agent_info
         )
 
     def _process_context(self, context: List[Tuple]):
@@ -623,7 +575,7 @@ class Experiment1Dataset(Dataset):
         B, N, L, A, M = self.B, self.N, self.L, self.A, self.M
         device = self.device
 
-        kp_local = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]
+        kp_local = [PseudoDemoGenerator.agent_keypoints[k] for k in Experiment1Dataset.kp_order]
         kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  # [4,2]
 
         # Containers
@@ -728,8 +680,7 @@ def collate_items(batch: List[Experiment1Item]) -> Experiment1Item:
 
 def retrieval_curve(z_test, id_test, ref_Z, ref_ids, ks, curvature, dist_fn=None):
     """
-    Returns list of (k, acc_at_k). Uses hyperbolic distance already implicit in your pipeline.
-    If you don't have a separate dist_fn, we approximate by calling topk_retrieval_acc per k.
+    Returns list of (k, acc_at_k).
     """
     accs = []
     for k in ks:

@@ -1,3 +1,4 @@
+#boiler plate code from chatgpt, adapted by me 
 from .game_aux import * 
 import random
 import json
@@ -161,12 +162,6 @@ class Game:
         return np.array(pixels)
 
     def save_config(self, filename):
-        """
-        Save the current game configuration to a JSON file.
-        
-        Args:
-            filename (str): Path to save the configuration file
-        """
         config = {
             # Game parameters
             'screen_width': self.screen_width,
@@ -218,15 +213,6 @@ class Game:
             print(f"Error saving configuration: {e}")
 
     def load_config(self, filename):
-        """
-        Load game configuration from a JSON file and reinitialize the game.
-        
-        Args:
-            filename (str): Path to the configuration file
-            
-        Returns:
-            bool: True if loaded successfully, False otherwise
-        """
         try:
             if not os.path.exists(filename):
                 print(f"Configuration file {filename} not found")

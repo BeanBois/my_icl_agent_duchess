@@ -156,6 +156,7 @@ class Policy(nn.Module):
         pred_node_emb, _ = self.rho(flat_pred_local_graphs)
         pred_rho_batch = pred_node_emb['agent'].view(B,T, num_agent_nodes,-1) # [B, T, A, de] 
         flat_pred_rho_batch = pred_rho_batch.view(B*T, num_agent_nodes, -1) # [B*T, num_agent_nodes, self.euc_dim]
+        
         ############################ Now for hyperbolic embeddings ###################################
 
         # now we have curr_agent_pos [B, A, agent_dim], pred_agent_pos [B,T,A,agent_dim] and demo_agent_pos [B,N,L,A,agent_dim]
@@ -207,7 +208,8 @@ class Policy(nn.Module):
         final_embd = self.intra_action(pred_embd) # let agent nodes within each timestep 'coordinate; amongst themselves
 
         denoising_direction = self.action_head(final_embd) # [B,T,5] tran_x, tran_y, rot_x, rot_y, state_change
-        
+        if torch.all(torch.isnan(denoising_direction)):
+            breakpoint()
         return denoising_direction
 
     def _pool_agents_to_batch(self, u_agents: torch.Tensor, rho_g: torch.Tensor) -> torch.Tensor:

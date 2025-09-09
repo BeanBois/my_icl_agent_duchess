@@ -1,4 +1,4 @@
-# game_aux.py (append near your enums)
+
 from dataclasses import dataclass
 import math
 import random 
@@ -115,7 +115,6 @@ class ParkAtPoseStrategy(ObjectiveStrategy):
         self.difficulty = difficulty
 
     def setup(self, game):
-        # optional: show a visual marker using your Goal rect for now
         game.goal = Goal(int(self.target.x), int(self.target.y))
 
         # create 3 obstacles walls around parking space of PLAYER_SIZE * 2.5 

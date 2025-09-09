@@ -136,7 +136,7 @@ def lambda_x(x, c):
     x2 = (x * x).sum(dim=-1, keepdim=True)
     return 2.0 / (1.0 - c * x2).clamp_min(1e-15)
 
-def _safe_norm(x, dim=-1, keepdim=False, eps=1e-15):
+def _safe_norm(x, dim=-1, keepdim=True, eps=1e-15):
     return torch.clamp(torch.norm(x, dim=dim, keepdim=keepdim), min=eps)
 
 def _sqrt_c(c):

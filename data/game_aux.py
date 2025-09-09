@@ -1,3 +1,4 @@
+#boiler plate code from chatgpt, adapted by me 
 from .game_configs import *
 
 import math

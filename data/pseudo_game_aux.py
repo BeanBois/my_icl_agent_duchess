@@ -13,12 +13,10 @@ def world_to_img(screen_height, x, y):
     return row, col
 
 def world_to_img_xy(screen_height, x, y):
-    """Return (x_img, y_img) == (col, row) for rasterising formulas."""
     r, c = world_to_img(screen_height, x, y)
     return float(c), float(r)
 
 def triangle_mask(hw, pts_xy):
-    """Filled triangle mask from 3 vertices given in image coords (x=col, y=row)."""
     H, W = hw
     (x1,y1), (x2,y2), (x3,y3) = pts_xy
 
@@ -203,7 +201,6 @@ class PseudoPlayer:
 
 
     def _snap_xy(self):
-        """snap current (x,y) to nearest int and clamp to screen."""
         p = [int(self.x), int(self.y)]
         # clamp to screen bounds considering size
         px = int(max(self.size, min(self.screen_width - self.size, p[0])))

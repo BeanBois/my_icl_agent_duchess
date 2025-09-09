@@ -1,3 +1,5 @@
+# boilerplate code by chatgpt, edited for my use
+
 from data.game_aux import PlayerState
 from data.interface import GameInterface
 import torch 
@@ -49,10 +51,6 @@ def collect_demos(game_interface, num_demos, manual=True, max_demo_length = 20):
     return provided_demos
 
 def downsample_obs(observations, target_length):
-        """
-        Downsample observations to demo_length items.
-        """
-        
         if len(observations) <= target_length:
             return observations
         
@@ -85,14 +83,6 @@ def downsample_obs(observations, target_length):
         return result
 
 def process_obs(curr_obs: List[Dict], B,A,M,device):
-    """
-    curr_obs: list length B. Each element is a list of observation dicts
-                (from PDGen._get_ground_truth: 'curr_obs_set').
-    We take the FIRST obs of each sample as the 'current' one and turn it
-    into tensors:
-        - curr_agent_info: [B, A=4, 6] with [x,y,orientation,state,time,done]
-        - curr_object_pos: [B, M, 2]  sampled coords
-    """
     device = device
 
     # fixed keypoint order (matches 4 nodes expected by A=4)
@@ -111,26 +101,26 @@ def process_obs(curr_obs: List[Dict], B,A,M,device):
         ori_deg = float(ob["agent-orientation"])
         ori_rad = math.radians(ori_deg)
         st = ob["agent-state"]
-        st_val = float(getattr(st, "value", st))  # enum -> int if needed
+        st_val = float(getattr(st, "value", st))  
         t_val = float(ob["time"])
         done_val = float(bool(ob["done"]))
 
         # Rotate local KPs to world and translate by agent center
         c, s = math.cos(ori_rad), math.sin(ori_rad)
         R = torch.tensor([[c, -s],
-                            [s,  c]], dtype=torch.float32, device=device)     # [2,2]
-        kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)  # [4,2]
+                            [s,  c]], dtype=torch.float32, device=device)     
+        kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)   
 
         # Pack [x,y,orientation,state,time,done] per keypoint
         o = torch.full((A, 1), ori_deg, dtype=torch.float32, device=device)
         stt = torch.full((A, 1), st_val, dtype=torch.float32, device=device)
         tt = torch.full((A, 1), t_val, dtype=torch.float32, device=device)
         dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
-        agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
+        agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  
         agent_infos.append(agent_info)
 
-        # Object coords → pick exactly M 2D points
-        coords_np = ob["coords"]  # numpy array [K,2] (possibly K != M)
+        # Downsample pc
+        coords_np = ob["coords"]  
         K = int(coords_np.shape[0])
         if K == 0:
             # nothing detected → zeros
@@ -144,23 +134,13 @@ def process_obs(curr_obs: List[Dict], B,A,M,device):
             sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
         obj_coords_all.append(sel)
 
-    curr_agent_info = torch.stack(agent_infos, dim=0)  # [B,4,6]
-    curr_object_pos = torch.stack(obj_coords_all, dim=0)  # [B,M,2]
+    curr_agent_info = torch.stack(agent_infos, dim=0) 
+    curr_object_pos = torch.stack(obj_coords_all, dim=0)   
     return curr_agent_info, curr_object_pos
 
 def process_context(context: List[Dict], B, N, L, M, A, device):
-    """
-    context: list length B; each element is a LIST of N demos.
-                Each demo is (observations, actions) where:
-                - observations: list length L of obs dicts (already downsampled in PDGen)
-                - actions: tensor [L-1, 10] (accumulated, already downsampled in PDGen)
-    Returns:
-        demo_agent_info  : [B, N, L, A=4, 6]
-        demo_object_pos  : [B, N, L, M, 2]
-    """
-
     kp_local = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]
-    kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  # [4,2]
+    kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  
 
     # Containers
     all_demo_agent_info = []
@@ -179,24 +159,23 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
         c, s = math.cos(ori_rad), math.sin(ori_rad)
         R = torch.tensor([[c, -s],
                             [s,  c]], dtype=torch.float32, device=device)
-        kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], dtype=torch.float32, device=device)  # [4,2]
+        kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], dtype=torch.float32, device=device)  
 
         o = torch.full((A, 1), ori_deg, dtype=torch.float32, device=device)
         stt = torch.full((A, 1), st_val, dtype=torch.float32, device=device)
         tt = torch.full((A, 1), t_val, dtype=torch.float32, device=device)
         dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
-        return torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
+        return torch.cat([kp_world, o, stt, tt, dd], dim=1)   
 
     for b in range(B):
-        demos = context[b]  # list of N demos
+        demos = context[b]   
         assert len(demos) == N, f"Expected {N} demos, got {len(demos)}"
 
         demo_infos = []
         demo_objs = []
 
         for n in range(N):
-            observations = demos[n]  # observations: list L; actions: [L-1,10] torch
-            # Observations → [L, A, 6] and [L, M, 2]
+            observations = demos[n]  
             agent_info_steps = []
             obj_steps = []
             for l in range(L):
@@ -207,6 +186,7 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
                 ob = observations[l]
                 agent_info_steps.append(obs_to_agent_info(ob))
 
+                # Downsample pc
                 coords_np = ob["coords"]
                 K = int(coords_np.shape[0])
                 if K == 0:
@@ -219,28 +199,19 @@ def process_context(context: List[Dict], B, N, L, M, A, device):
                     sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
                 obj_steps.append(sel)
 
-            demo_infos.append(torch.stack(agent_info_steps, dim=0))  # [L,4,6]
-            demo_objs.append(torch.stack(obj_steps, dim=0))          # [L,M,2]
+            demo_infos.append(torch.stack(agent_info_steps, dim=0)) 
+            demo_objs.append(torch.stack(obj_steps, dim=0))         
 
-        all_demo_agent_info.append(torch.stack(demo_infos, dim=0))  # [N,L,4,6]
-        all_demo_obj.append(torch.stack(demo_objs, dim=0))          # [N,L,M,2]
+        all_demo_agent_info.append(torch.stack(demo_infos, dim=0))  
+        all_demo_obj.append(torch.stack(demo_objs, dim=0))          
 
-    demo_agent_info = torch.stack(all_demo_agent_info, dim=0)  # [B,N,L,4,6]
-    demo_object_pos = torch.stack(all_demo_obj, dim=0)         # [B,N,L,M,2]
+    demo_agent_info = torch.stack(all_demo_agent_info, dim=0) 
+    demo_object_pos = torch.stack(all_demo_obj, dim=0)        
 
     return demo_agent_info, demo_object_pos
 
 
 def action_from_vec(action, theta_deg, state_action=None):
-    """
-    action: [tx, ty, dtheta, (optional: ...)]
-        tx, ty are CLEAN translations in IMAGE coords (x right, y DOWN)
-        dtheta is rotation in RADIANS (positive = CCW)
-    theta_deg: agent's absolute heading at time t (degrees, CCW-positive)
-    state_action: your PlayerState (or None)
-
-    Returns an Action with signed forward_movement in the agent's frame.
-    """
     tx = float(action[0])
     ty = float(action[1])
     dtheta = float(action[2])
@@ -254,33 +225,15 @@ def action_from_vec(action, theta_deg, state_action=None):
     dx_world = tx
 
     # Project world translation onto body frame (forward = +x_body, left = +y_body)
-    s_forward = dx_world * c + dy_world * s          # signed forward/backward
-    s_lateral = -dx_world * s + dy_world * c         # signed left/right (optional)
+    s_forward = dx_world * c + dy_world * s          
+    s_lateral = -dx_world * s + dy_world * c         
 
     return Action(
-        forward_movement = s_forward,                 # keep the sign!
+        forward_movement = s_forward,                 
         rotation_deg     = math.degrees(dtheta),
         state_change     = state_action
-        # If you support strafing, add: lateral_movement = s_lateral
     )
 
-# def action_from_vec(action): #x,y,theta,state_change [4] vector 
-#     action = action
-#     state_action = None 
-#     theta = action[2]
-#     heading = torch.tensor([math.cos(theta), math.sin(theta)])  # from agent orientation
-#     forward_movement = float(action[0] * heading[0] + action[1] * heading[1])
-
-#     for state in PlayerState:
-#         if round(torch.clamp(action[-1],0,1).item()) == state.value:
-#             state_action = state
-#             break 
-#     action_obj = Action(
-#         forward_movement = forward_movement,
-#         rotation_deg = torch.rad2deg(theta),
-#         state_change = state_action
-#     )
-#     return action_obj 
 
 def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20, 
                 max_iter = 100, refine=10, keypoints=AGENT_KEYPOINTS, manual = True):
@@ -295,9 +248,9 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
     won = False 
     while not done and _t < max_iter:
         curr_agent_info, curr_object_pos = process_obs([curr_obs], 1, 4, cfg.num_sampled_pc, cfg.device)
-        # for _ in range(horizon):
+
         actions = agent.plan_actions(
-            curr_agent_info = curr_agent_info,         # shape as in training
+            curr_agent_info = curr_agent_info,         
             curr_object_pos = curr_object_pos,
             demo_agent_info = demo_agent_info,
             demo_object_pos = demo_object_pos,
@@ -314,7 +267,7 @@ def rollout_once(game_interface, agent, num_demos = 2, max_demo_length = 20,
                 won = curr_obs['won']
                 break
             _t +=1
-            # break # take first action only
+            break # take first action only
     return won 
         
 
@@ -348,7 +301,7 @@ if __name__ == "__main__":
         curvature=cfg.hyp_curvature,
         tau=cfg.tau
 
-    ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
+    ).to(cfg.device)  
     agent_state_dict = torch.load('agent.pth', map_location="cpu")
     agent.load_state_dict(agent_state_dict['model'])
     agent.eval()

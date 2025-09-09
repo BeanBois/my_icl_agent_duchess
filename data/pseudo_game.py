@@ -35,7 +35,6 @@ def is_obstacle_blocking(player_pos, goal_center, obst_center, obst_width, obst_
     return False, None
 
 def _interpolate_polyline(wps_xy: np.ndarray, step_px: float) -> np.ndarray:
-    """Return dense (M,2) path by linear interpolation with ~step_px spacing."""
     out = []
     for a, b in zip(wps_xy[:-1], wps_xy[1:]):
         v = b - a
@@ -48,18 +47,13 @@ def _interpolate_polyline(wps_xy: np.ndarray, step_px: float) -> np.ndarray:
         out.append(seg)
     out.append(wps_xy[-1][None, :])  # include last point exactly
     path = np.vstack(out)
-    # round to integer grid if you keep an integer world
-    # path = np.rint(path).astype(np.int32)
+
     # dedupe consecutive duplicates caused by rounding
     keep = np.ones(len(path), dtype=bool)
     keep[1:] = np.any(path[1:] != path[:-1], axis=1)
     return path[keep]
 
 def build_interpolated_plan(waypoints: np.ndarray, step_px: float):
-    """
-    waypoints: (N,3) [x,y,state_value]. Returns (M,3) interpolated [x,y,state_value].
-    State changes ‘take effect’ once the agent REACHES each original waypoint.
-    """
     wps_xy = waypoints[:, :2].astype(float)
     wps_state = waypoints[:, 2].astype(int)
 
@@ -86,15 +80,9 @@ def build_interpolated_plan(waypoints: np.ndarray, step_px: float):
     return plan.astype(np.int32)
 
 def signed_heading_error_deg(theta_deg, px, py, tx, ty):
-    """
-    theta_deg: current heading where 0°=east, +CW (your convention)
-    (px,py):  current position in *screen coords*  (y down)
-    (tx,ty):  target position in *screen coords*   (y down)
-    returns:  smallest signed angle error in degrees, where + means "rotate CW"
-    """
     # current heading unit vector in *screen* coords (y down)
     th = np.deg2rad(theta_deg)
-    hx, hy = np.cos(th), np.sin(th)  # matches your move: x+=cos, y+=sin
+    hx, hy = np.cos(th), np.sin(th)  
 
     # target direction unit vector in *screen* coords
     dx, dy = (tx - px), (ty - py)
@@ -231,8 +219,8 @@ class PseudoGame:
 
 
         return {
-            'coords' : coords_img,                 # or coords_img if your model expects image-space
-            'agent-pos' : agent_pos,                 # world coords as before
+            'coords' : coords_img,                
+            'agent-pos' : agent_pos,                
             'agent-state' : agent_state,
             'agent-orientation' : self.player.get_orientation('deg'),  # world angle, keep as-is
             'done' : self.t >= self.max_length or self.done,
@@ -336,8 +324,7 @@ class PseudoGame:
         plt.imshow(
             self.screen,
             origin="upper",
-    #         extent=[0, W, H, 0],     # x: 0..W, y (down): 0..H
-            extent=[0, W, 0, H],   # <-- was [0, W, H, 0]; don't invert y here
+            extent=[0, W, 0, H],   
             interpolation="nearest",
         )
         plt.gca().set_aspect("equal")
@@ -781,11 +768,6 @@ class PseudoGame:
         return waypoints_with_player_state
         
     def _augment_waypoints(self, waypoints_with_player_state):
-        """
-        Implement data augmentation:
-        1. For 30% of trajectories: add local disturbances with corrective actions
-        2. For 10% of data points: change gripper open-close state (eating state)
-        """
         augmented_waypoints = waypoints_with_player_state.copy()
         
         # 1. Local disturbances for 30% of trajectories
@@ -796,10 +778,6 @@ class PseudoGame:
         return augmented_waypoints
 
     def _add_local_disturbances(self, waypoints_with_player_state):
-        """
-        Add local disturbances to waypoints and insert corrective waypoints
-        to bring the trajectory back to the reference path.
-        """
         original_waypoints = waypoints_with_player_state.copy()
         augmented_waypoints = []
                 
@@ -852,10 +830,6 @@ class PseudoGame:
         return np.array(augmented_waypoints)
 
     def _add_state_changes(self, waypoints_with_player_state, change_probability=0.1):
-        """
-        Randomly change the eating state for a percentage of waypoints.
-        This helps the policy learn to re-grasp/re-engage after state changes.
-        """
         augmented_waypoints = waypoints_with_player_state.copy()
         
         for i in range(len(augmented_waypoints)):
@@ -877,13 +851,11 @@ class PseudoGame:
         return
     
     def _world_to_img(self, x, y):
-        """World: x→right, y→up  →  Image: row (y down), col (x right)."""
         row = int(self.screen_height - 1 - y)
         col = int(x)
         return row, col
 
     def _img_to_world(self, row, col):
-        """Image (row, col) → World (x, y up)."""
         x = float(col)
         y = float(self.screen_height - 1 - row)
         return x, y
