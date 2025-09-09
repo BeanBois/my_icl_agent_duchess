@@ -1,5 +1,6 @@
 __pycache__/
 checkpoints/
 _checkpoints/
+__checkpoints/
 *pt
 demo*.json

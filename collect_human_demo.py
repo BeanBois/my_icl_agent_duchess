@@ -26,20 +26,9 @@ NUM_KIND_OF_DEMO = 4
 
 
 def save_demo(demo, filepath):
-    """
-    Save demo data (list of dictionaries) to file.
-    
-    Args:
-        demo (list): List of dictionaries containing observations
-        filepath (str): Path to save the demo file (without extension)
-    """
     try:
-        # Ensure directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        # Try to save as JSON first (more readable and portable)
         try:
-            # Convert numpy arrays to lists for JSON serialization
             json_demo = []
             for observation in demo:
                 json_obs = {}
@@ -84,23 +73,11 @@ def save_demo(demo, filepath):
         raise
 
 def load_demo(filepath):
-    """
-    Load demo data from file.
-    
-    Args:
-        filepath (str): Path to the demo file (without extension)
-        
-    Returns:
-        list: List of dictionaries containing observations
-    """
     try:
-        # Try JSON first
         json_path = filepath + '.json'
         if os.path.exists(json_path):
             with open(json_path, 'r') as f:
                 data = json.load(f)
-            
-            # Convert back numpy arrays
             demo = []
             for observation in data['observations']:
                 obs = {}
@@ -116,7 +93,6 @@ def load_demo(filepath):
             print(f"Demo loaded from JSON: {json_path} ({len(demo)} observations)")
             return demo
         
-        # Try pickle
         pkl_path = filepath + '.pkl'
         if os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as f:
@@ -132,13 +108,6 @@ def load_demo(filepath):
         raise
 
 def save_demo_metadata(demo, filepath):
-    """
-    Save metadata about the demo for quick inspection.
-    
-    Args:
-        demo (list): List of dictionaries containing observations
-        filepath (str): Path to save the metadata file
-    """
     try:
         if not demo:
             metadata = {'demo_length': 0, 'keys': [], 'sample_observation': None}
@@ -163,19 +132,10 @@ def save_demo_metadata(demo, filepath):
         print(f"Warning: Could not save metadata: {e}")
 
 def save_demo_with_metadata(demo, filepath):
-    """
-    Save demo and its metadata.
-    
-    Args:
-        demo (list): List of dictionaries containing observations
-        filepath (str): Path to save the demo file (without extension)
-    """
     save_demo(demo, filepath)
     save_demo_metadata(demo, filepath)
 
 def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSET_SIZE):
-    """Collect human demonstrations across different configurations."""
-    
     for i in range(num_types_demo):
         print(f"\n{'='*50}")
         print(f"Collecting DEMOSET {i}/{num_types_demo}")
@@ -226,13 +186,6 @@ def collect_human_demos(num_types_demo = NUM_KIND_OF_DEMO, demoset_size = DEMOSE
         print(f"Completed demoset {i}: {demoset_size} demos collected")
 
 def load_and_inspect_demo(demoset_id, demo_id):
-    """
-    Load and inspect a specific demo.
-    
-    Args:
-        demoset_id (int): ID of the demo set
-        demo_id (int): ID of the demo within the set
-    """
     filepath = f'human_demo/demoset{demoset_id}/demo{demo_id}'
     
     try:
@@ -247,15 +200,6 @@ def load_and_inspect_demo(demoset_id, demo_id):
         return None
 
 def load_demo_config(demoset_id):
-    """
-    Load the configuration for a specific demo set.
-    
-    Args:
-        demoset_id (int): ID of the demo set
-        
-    Returns:
-        dict: Configuration dictionary
-    """
     config_path = f'human_demo/demoset{demoset_id}/demo_config.json'
     
     try:
@@ -269,13 +213,6 @@ def load_demo_config(demoset_id):
         return None
 
 def replay_demo_with_config(demoset_id, demo_id):
-    """
-    Replay a demo using its original configuration.
-    
-    Args:
-        demoset_id (int): ID of the demo set
-        demo_id (int): ID of the demo within the set
-    """
     # Load configuration
     config = load_demo_config(demoset_id)
     if not config:
@@ -300,8 +237,6 @@ def replay_demo_with_config(demoset_id, demo_id):
 
 
 def collect_human_demos_for(objective, demo_num):
-    """Collect human demonstrations across different configurations."""
-    
     print(f"\n{'='*50}")
     print(f"Collecting for DEMOSET {objective.value - 1}")
     print(f"{'='*50}")
@@ -357,7 +292,7 @@ if __name__ == "__main__":
 
     # collect_human_demos(num_types_demo=4,demoset_size=10)
 
-
+    # change any sets if demos not good
     from data import GameObjective
     collect_human_demos_for(GameObjective.REACH_GOAL, 4)
     
