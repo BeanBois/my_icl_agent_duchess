@@ -449,7 +449,7 @@ class TrainConfig:
     batch_size: int = 1      # Each dataset item already contains an internal B; keep 1 here for the stub
     lr: float = 1e-6
     weight_decay: float = 1e-4
-    max_steps: int = 20000
+    max_steps: int = 50000
     log_every: int = 50
     ckpt_every: int = 1000
     out_dir: str = "./checkpoints"
@@ -470,8 +470,8 @@ class TrainConfig:
     max_diffusion_steps = 1000
     beta_start = 1e-4
     beta_end = 0.02
-    continue_training = True
-    offset =112000
+    continue_training = False
+    offset =0
     
     # pseudo-demo configs
     num_demos_given = 2
@@ -480,9 +480,9 @@ class TrainConfig:
 
     # geometry encoder configs
     num_sampled_pc = 8
-    num_chosen_pc = 128 # downsample original set of point clouds
-    train_geo_encoder = False
-    k_neighbours = 8
+    num_chosen_pc = 256 # downsample original set of point clouds
+    train_geo_encoder = True
+    k_neighbours = 16
     geo_num_samples = 5000
     geo_num_epochs = 20
 
