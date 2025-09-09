@@ -222,9 +222,9 @@ class Policy(nn.Module):
         w = torch.softmax(self.agent_pool_q(rho_g).squeeze(-1), dim=1)   # (B, A)
 
         # pool in tangent for stability
-        u_tan = logmap0(u_agents, self.curvature)                        # (B, A, Dh)
+        u_tan = poincare_log0(u_agents, self.curvature)                        # (B, A, Dh)
         pooled_tan = torch.einsum('ba,bad->bd', w, u_tan)                # (B, Dh)
-        u_batch = expmap0(pooled_tan, self.curvature)                    # (B, Dh)
+        u_batch = poincare_exp0(pooled_tan, self.curvature)                    # (B, Dh)
         return u_batch
 
         

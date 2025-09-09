@@ -2,7 +2,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utilities import log_map_x, exp_map_x, poincare_distance_sq
+from utilities import poincare_distance_sq, exp_map_x, log_map_x
+
 
 
 class ProductManifoldAttention(nn.Module):

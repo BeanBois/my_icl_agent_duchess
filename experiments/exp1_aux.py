@@ -12,7 +12,7 @@ HERE = os.path.abspath(os.path.dirname(__file__))
 if HERE not in sys.path: sys.path.insert(0, HERE)
 
 try:
-    from utilities import logmap0 as poincare_log0, expmap0 as poincare_exp0
+    from utilities import  poincare_log0, poincare_exp0
 except Exception as e:
     raise RuntimeError("Could not import log0/exp0 from demo_handler.py. "
                        "Make sure demo_handler.py is in the same folder.") from e

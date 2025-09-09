@@ -4,7 +4,7 @@ from typing import List, Tuple
 import math
 import numpy as np
 
-# SE2 Helpers
+######## SE2 Helpers ########
 def _wrap_to_pi(theta: Tensor) -> Tensor:
     pi = math.pi
     return (theta + pi) % (2 * pi) - pi
@@ -34,7 +34,7 @@ def se2_log(a: Tensor) -> Tensor:
     vy = -invB * dx + invA * dy
     return torch.stack([vx, vy, _wrap_to_pi(w)], dim=-1)
 
-# action aux
+######## action aux ########
 def se2_from_kp(P, Q, eps=1e-6):
     B, K, _ = P.shape
     Pc = P.mean(dim=1, keepdim=True)
@@ -51,98 +51,74 @@ def se2_from_kp(P, Q, eps=1e-6):
     dtheta = torch.atan2(R[:,1,0], R[:,0,0])
     return t[:,0], t[:,1], dtheta
 
-# point care aux
-def expmap0(v: torch.Tensor, c: float, eps: float = 1e-6) -> torch.Tensor:
-    sqc = _sqrt_c(c)
-    v_norm = torch.clamp(v.norm(dim=-1, keepdim=True), min=eps)
-    coef = torch.tanh(sqc * v_norm / 2.0) / (sqc * v_norm)
-    return coef * v
+######### point care aux ########
+def artanh(x, eps=1e-15):
+    x = torch.clamp(x, -1 + eps, 1 - eps)
+    return 0.5 * (torch.log1p(x) - torch.log1p(-x))
 
-def logmap0(x: torch.Tensor, c: float, eps: float = 1e-6) -> torch.Tensor:
-    sqc = _sqrt_c(c)
-    x_norm = torch.clamp(x.norm(dim=-1, keepdim=True), min=eps)
-    arg = torch.clamp(sqc * x_norm, max=1 - 1e-6)  # stay inside ball
-    coef = (2.0 / sqc) * torch.atanh(arg) / x_norm
-    return coef * x
+def poincare_exp0(v, c):
+    norm = torch.norm(v, dim=-1, keepdim=True).clamp_min(1e-9)
+    factor = torch.tanh(torch.sqrt(c) * norm) / (torch.sqrt(c) * norm)
+    return factor * v
 
-def mobius_add(x: torch.Tensor, y: torch.Tensor, c: float, eps: float = 1e-6) -> torch.Tensor:
-    x2 = (x * x).sum(dim=-1, keepdim=True)
-    y2 = (y * y).sum(dim=-1, keepdim=True)
-    xy = (x * y).sum(dim=-1, keepdim=True)
+def poincare_log0(x, c):
+    norm = torch.norm(x, dim=-1, keepdim=True).clamp_min(1e-9)
+    factor = artanh(torch.sqrt(c) * norm) / (torch.sqrt(c) * norm)
+    return factor * x
+
+def mobius_add(x, y, c):
+    x2 = (x * x).sum(-1, keepdim=True)
+    y2 = (y * y).sum(-1, keepdim=True)
+    xy = (x * y).sum(-1, keepdim=True)
     num = (1 + 2 * c * xy + c * y2) * x + (1 - c * x2) * y
-    den = 1 + 2 * c * xy + c**2 * x2 * y2
-    return num / torch.clamp(den, min=eps)
+    den = 1 + 2 * c * xy + (c**2) * x2 * y2
+    return num / den.clamp_min(1e-9)
 
-def mobius_scalar_mul(t, x, c, eps=1e-6):
-    nx = x.norm(dim=-1, keepdim=True).clamp_min(eps)
-    rn = torch.tanh(t * torch.atanh(_sqrt_c(c)*nx)) * x / ( _sqrt_c(c) * nx )
-    return rn
+def log_map_x(x, y, c):
+    if type(c) != torch.Tensor:
+        c = torch.tensor(c)
+    w = mobius_add(-x, y, c)                              
+    v0 = poincare_log0(w, c)                              
+    lam = _lambda_x(x, c)                                 
+    return (2.0 / lam) * v0
 
-def geodesic_segment(x, y, c, T: int):
-    delta = mobius_add(-x, y, c)                                   
-    ts = torch.linspace(0, 1, T + 1, device=x.device, dtype=x.dtype).view(1, T + 1, 1)  
-    path = mobius_add(x.unsqueeze(1),                               
-                      mobius_scalar_mul(ts, delta.unsqueeze(1), c), 
-                      c)                                            
-    return path
+def exp_map_x(x, v, c):
+    if type(c) != torch.Tensor:
+        c = torch.tensor(c)
+    lam = _lambda_x(x, c)
+    step = (lam * 0.5) * v
+    return mobius_add(x, poincare_exp0(step, c), c)
 
-def poincare_weighted_mean(x: torch.Tensor, w: torch.Tensor, c: float, eps: float = 1e-6) -> torch.Tensor:
-    v = logmap0(x, c)                               
-    m = torch.sum(w.unsqueeze(-1) * v, dim=-2)      
-    y = expmap0(m, c)                               
-    # clamp to inside ball for stability
-    max_rad = (1.0 / _sqrt_c(c)) - 1e-5
-    norm = torch.norm(y, dim=-1, keepdim=True) + eps
-    scale = torch.clamp(max_rad / norm, max=1.0)
-    return y * scale
-
-def poincare_dist(x, y, c, eps=1e-6):
-    x2 = (x*x).sum(-1, keepdim=True)
-    y2 = (y*y).sum(-1, keepdim=True)
-    num = 2 * ((x - y)**2).sum(-1, keepdim=True) * c
-    den = torch.clamp((1 - c*x2)*(1 - c*y2), min=eps)
-    z = 1 + num/den
-    d = torch.log(z + torch.sqrt(torch.clamp(z*z - 1, min=0.0))) / _sqrt_c(c)
-    return d.squeeze(-1)
+def poincare_dist(x, y, c, eps=1e-9):
+    diff = mobius_add(-x, y, c)
+    norm = torch.norm(diff, dim=-1).clamp_min(eps)
+    return (2.0 / torch.sqrt(c)) * artanh(torch.sqrt(c) * norm)
 
 def poincare_distance_sq(x, y, c):
     sqrt_c = c ** 0.5
-    x = proj_ball(x, c)
-    y = proj_ball(y, c)
-    diff = mobius_add(-x, y, c)               
+    x = _project_to_ball(x, c)
+    y = _project_to_ball(y, c)
+    diff = mobius_add(-x, y, c)              
     norm = _safe_norm(diff, dim=-1)
     arg = torch.clamp(sqrt_c * norm, max=1 - 1e-7)
     dist = (2.0 / sqrt_c) * torch.atanh(arg)
     return dist * dist
 
-def proj_ball(x, c, eps=1e-5):
-    max_norm = (1.0 / (c**0.5)) - eps
-    n = x.norm(dim=-1, keepdim=True)
-    scale = (max_norm / n).clamp(max=1.0)
-    return x * scale
-
-def log_map_x(x, y, c):
-    w = mobius_add(-x, y, c)                              
-    v0 = logmap0(w, c)                              
-    lam = lambda_x(x, c)                                 
-    return (2.0 / lam) * v0
-
-def exp_map_x(x, v, c):
-    lam = lambda_x(x, c)
-    step = (lam * 0.5) * v
-    return mobius_add(x, expmap0(step, c), c)
-
-def lambda_x(x, c):
+def _lambda_x(x, c):
     x2 = (x * x).sum(dim=-1, keepdim=True)
     return 2.0 / (1.0 - c * x2).clamp_min(1e-15)
 
 def _safe_norm(x, dim=-1, keepdim=True, eps=1e-15):
     return torch.clamp(torch.norm(x, dim=dim, keepdim=keepdim), min=eps)
 
-def _sqrt_c(c):
-    return c ** 0.5
+def _project_to_ball(x, c, eps=1e-5):
+    sqrt_c = c ** 0.5
+    norm = _safe_norm(x, dim=-1, keepdim=True)
+    max_norm = (1. - eps) / sqrt_c
+    scale = torch.where(norm > max_norm, max_norm / norm, torch.ones_like(norm))
+    return x * scale
 
-# Geometric Encoder Aux 
+######### Geometric Encoder Aux #########
 def furthest_point_sampling_2d(P: torch.Tensor, M: int) -> torch.Tensor:
     device = P.device
     N = P.shape[0]
@@ -177,7 +153,7 @@ def fourier_embed_2d(delta: Tensor, num_freqs: int = 10) -> Tensor:
     return torch.cat([sin_x, cos_x, sin_y, cos_y], dim=-1)  
 
 
-# batching aux
+######### batching aux #########
 def split_by_batch(x: Tensor, batch_vec: Tensor) -> List[Tensor]:
     B = int(batch_vec.max().item()) + 1 if batch_vec.numel() > 0 else 1
     outs: List[Tensor] = []
