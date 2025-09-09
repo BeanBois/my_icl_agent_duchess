@@ -1,3 +1,4 @@
+# chatgpt helped me optimised so for-loops i used
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,12 +6,6 @@ from utilities import log_map_x, exp_map_x, poincare_distance_sq
 
 
 class ProductManifoldAttention(nn.Module):
-    """
-    Product-space attention (H × E):
-      - Scores from product metric: s = -(λ_H d_H^2 + λ_E ||.||^2) / τ
-      - Euclidean aggregation: weighted average
-      - Hyperbolic aggregation: weighted Karcher mean (log/exp at current point)
-    """
     def __init__(
         self,
         de: int,              # Euclidean feature dim (de)
@@ -53,22 +48,13 @@ class ProductManifoldAttention(nn.Module):
 
     @staticmethod
     def _flatten_demos(demo_rho_batch, demo_hyp_emb):
-        """
-        Flatten over (N, L) → M = N*L.
-        demo_rho_batch: [B,N,L,A,de] → [B,M,A,de]
-        demo_hyp_emb:   [B,N,L,dh]   → [B,M,dh]
-        """
         B, N, L, A, de = demo_rho_batch.shape
         M = N * L
         demo_rho_flat = demo_rho_batch.view(B, M, A, de)
-        demo_hyp_flat = demo_hyp_emb.reshape(B, M, -1)  # dh
+        demo_hyp_flat = demo_hyp_emb.reshape(B, M, -1)  
         return demo_rho_flat, demo_hyp_flat  # [B,M,A,de], [B,M,dh]
 
     def _ensure_demo_roots(self, curr_hyp_emb, N):
-        """
-        Accepts curr_hyp_emb as [B, dh] or [B, N, dh].
-        Returns roots as [B, N, dh].
-        """
         if curr_hyp_emb.dim() == 2:
             B, dh = curr_hyp_emb.shape
             return curr_hyp_emb.unsqueeze(1).expand(B, N, dh)
@@ -78,16 +64,12 @@ class ProductManifoldAttention(nn.Module):
             raise ValueError(f"curr_hyp_emb must be [B,dh] or [B,N,dh], got {curr_hyp_emb.shape}")
 
     def _karcher_mean_points(self, pts, c, iters: int = 5, tol: float = 1e-6):
-        """
-        pts: [B, A, N, dh] points on the Poincaré ball.
-        Returns μ: [B, A, dh] (Fréchet/Karcher mean over N).
-        """
         B, A, N, dh = pts.shape
-        mu = pts[:, :, :1, :].clone()  # [B,A,1,dh], init from first
+        mu = pts[:, :, :1, :].clone()   
         for _ in range(iters):
-            v = log_map_x(mu.expand(B, A, N, dh), pts, c)         # [B,A,N,dh]
-            g = v.mean(dim=2, keepdim=True)                       # [B,A,1,dh]
-            mu = exp_map_x(mu, g, c)                              # [B,A,1,dh]
+            v = log_map_x(mu.expand(B, A, N, dh), pts, c)         
+            g = v.mean(dim=2, keepdim=True)                       
+            mu = exp_map_x(mu, g, c)                              
             if g.norm(dim=-1).max().item() < tol:
                 break
         return mu.squeeze(2)  # [B,A,dh]
@@ -102,7 +84,6 @@ class ProductManifoldAttention(nn.Module):
         device = curr_rho_batch.device
         B, A, de = curr_rho_batch.shape
         Bn, N, L, A_, de_ = demo_rho_batch.shape
-        # assert Bn == B and A_ == A and de_ == de, "demo_rho_batch shape mismatch"
         _, N2, L2, dh = demo_hyp_emb.shape
         assert N2 == N and L2 == L, "demo_hyp_emb shape mismatch"
 
@@ -111,69 +92,69 @@ class ProductManifoldAttention(nn.Module):
         # ---------- Product-metric attention scores (per demo) ----------
         # Euclidean: ||curr_e - demo_e||^2
         #   curr_e  [B,1,1,A,de]  vs  demo_e [B,N,L,A,de] → [B,N,L,A]
-        curr_e = curr_rho_batch.unsqueeze(1).unsqueeze(1)                 # [B,1,1,A,de]
-        e_diff_sq = ((curr_e - demo_rho_batch) ** 2).sum(dim=-1)          # [B,N,L,A]
-        e_diff_sq = e_diff_sq.permute(0, 3, 1, 2).contiguous()            # [B,A,N,L]
+        curr_e = curr_rho_batch.unsqueeze(1).unsqueeze(1)                 
+        e_diff_sq = ((curr_e - demo_rho_batch) ** 2).sum(dim=-1)          
+        e_diff_sq = e_diff_sq.permute(0, 3, 1, 2).contiguous()            
 
         # Hyperbolic: d^2( root_n, y_{n,ℓ} )
         #   roots → [B,N,1,dh] → [B,N,L,dh] to match demo_hyp_emb
-        roots_exp = roots.unsqueeze(2).expand(B, N, L, dh)                 # [B,N,L,dh]
+        roots_exp = roots.unsqueeze(2).expand(B, N, L, dh)                  
         dH2 = poincare_distance_sq(
             roots_exp.reshape(B, N*L, dh),
             demo_hyp_emb.reshape(B, N*L, dh),
             self.c
         ).view(B, N, L)  # [B,N,L]
-        dH2 = dH2.unsqueeze(1).expand(B, A, N, L)                          # [B,A,N,L]
+        dH2 = dH2.unsqueeze(1).expand(B, A, N, L)                          
 
-        # scores per demo/time: s = -(λ_H d_H^2 + λ_E ||.||^2) / τ
-        scores = -(self.lh * dH2 + self.le * e_diff_sq) / max(self.tau, 1e-8)  # [B,A,N,L]
+        # scores per demo/time: s = -(l_H d_H^2 + l_E ||.||^2) / tau
+        scores = -(self.lh * dH2 + self.le * e_diff_sq) / max(self.tau, 1e-8)   
 
         # ---------- Token weights *within each demo* (softmax over L) ----------
-        alpha_tok = torch.softmax(scores, dim=-1)  # [B,A,N,L]
+        alpha_tok = torch.softmax(scores, dim=-1)   
 
         # ---------- Euclidean aggregation per demo ----------
         # demo_rho_batch: [B,N,L,A,de] -> [B,A,N,L,de]
-        demo_e = demo_rho_batch.permute(0, 3, 1, 2, 4).contiguous()        # [B,A,N,L,de]
-        e_out_n = torch.sum(alpha_tok.unsqueeze(-1) * demo_e, dim=-2)      # [B,A,N,de]
+        demo_e = demo_rho_batch.permute(0, 3, 1, 2, 4).contiguous()         
+        e_out_n = torch.sum(alpha_tok.unsqueeze(-1) * demo_e, dim=-2)       
 
         # ---------- Hyperbolic aggregation per demo (log/exp at each root_n) ----------
         # logs: log_{root_n}( y_{n,ℓ} ) for all ℓ, then weight by alpha_tok
         log_vecs = log_map_x(
-            roots_exp.reshape(B, N*L, dh),              # x
-            demo_hyp_emb.reshape(B, N*L, dh),           # y
+            roots_exp.reshape(B, N*L, dh),               
+            demo_hyp_emb.reshape(B, N*L, dh),            
             self.c
-        ).view(B, N, L, dh)                              # [B,N,L,dh]
+        ).view(B, N, L, dh)                              
         # broadcast to [B,A,N,L,dh] to apply per-agent alpha
-        log_vecs_ba = log_vecs.unsqueeze(1).expand(B, A, N, L, dh)         # [B,A,N,L,dh]
-        v_n = torch.sum(alpha_tok.unsqueeze(-1) * log_vecs_ba, dim=-2)     # [B,A,N,dh]
+        log_vecs_ba = log_vecs.unsqueeze(1).expand(B, A, N, L, dh)        
+        v_n = torch.sum(alpha_tok.unsqueeze(-1) * log_vecs_ba, dim=-2)    
 
         # exp back at each root_n, per agent
-        roots_ba = roots.unsqueeze(1).expand(B, A, N, dh)                  # [B,A,N,dh]
-        h_out_n = exp_map_x(roots_ba, v_n, self.c)                         # [B,A,N,dh]
+        roots_ba = roots.unsqueeze(1).expand(B, A, N, dh)                 
+        h_out_n = exp_map_x(roots_ba, v_n, self.c)                        
 
         # ---------- Fuse across demos (learned gate) ----------
         # Demo-level gate from the scores averaged over time (higher = closer)
-        demo_scores = scores.mean(dim=-1)                                  # [B,A,N]
-        gamma = torch.softmax(demo_scores, dim=-1)                         # [B,A,N]
+        demo_scores = scores.mean(dim=-1)                                 
+        gamma = torch.softmax(demo_scores, dim=-1)                        
 
         # Euclidean fuse: weighted average across N
-        e_out = torch.sum(gamma.unsqueeze(-1) * e_out_n, dim=2)            # [B,A,de]
+        e_out = torch.sum(gamma.unsqueeze(-1) * e_out_n, dim=2)           
 
         # Hyperbolic fuse: Karcher mean across {h_out_n}_n using gamma
         # Do a weighted Karcher mean by repeating points proportionally to gamma in tangent.
 
         # Unweighted initial mean over demos:
-        mu0 = self._karcher_mean_points(h_out_n, self.c, iters=3)          # [B,A,dh]
+        mu0 = self._karcher_mean_points(h_out_n, self.c, iters=3)         
 
         # One weighted refinement step at mu0:
-        mu0_exp = mu0.unsqueeze(2).expand(B, A, N, dh)                     # [B,A,N,dh]
-        v_logs = log_map_x(mu0_exp, h_out_n, self.c)                       # [B,A,N,dh]
-        v_bar  = torch.sum(gamma.unsqueeze(-1) * v_logs, dim=2, keepdim=False)  # [B,A,dh]
-        h_out  = exp_map_x(mu0, v_bar, self.c)                             # [B,A,dh]
+        mu0_exp = mu0.unsqueeze(2).expand(B, A, N, dh)                    
+        v_logs = log_map_x(mu0_exp, h_out_n, self.c)                      
+        v_bar  = torch.sum(gamma.unsqueeze(-1) * v_logs, dim=2, keepdim=False)  
+        h_out  = exp_map_x(mu0, v_bar, self.c)                             
 
         # ---------- Project factors and combine ----------
-        z_e = self.proj_e(e_out)                                           # [B,A,z_e]
-        z_h = self.proj_h(h_out)                                           # [B,A,z_h]
-        z = torch.cat([z_e, z_h], dim=-1)                                  # [B,A,z_dim]
+        z_e = self.proj_e(e_out)                                           
+        z_h = self.proj_h(h_out)                                           
+        z = torch.cat([z_e, z_h], dim=-1)                                  
         z = self.drop(self.norm(z))
         return z

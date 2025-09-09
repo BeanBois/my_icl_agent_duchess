@@ -3,15 +3,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --- small Fourier encoder for relative (dx,dy,theta) edges (batched) ---
+# --- small Fourier encoder for relative (dx,dy,theta) edges ---
 class FourierEdgeEmbed(nn.Module):
     def __init__(self, num_freqs: int = 6, out_dim: int = 64):
         super().__init__()
         self.num_freqs = num_freqs
-        self.proj = nn.Linear(3 * (2 * num_freqs) + 2 , out_dim)  # dx,dy,theta -> 2*num_freqs each + sin/cos(theta)
+        self.proj = nn.Linear(3 * (2 * num_freqs) + 2 , out_dim)  
 
-    def forward(self, dxyth: torch.Tensor):  # [B, T, A, 3 or 4]; last can include state_action
-        # Use dx,dy,theta (ignore state_action for the edge encoding)
+    def forward(self, dxyth: torch.Tensor):  
+        # Use dx,dy,theta  
         dx = dxyth[..., 0:1]
         dy = dxyth[..., 1:2]
         th = dxyth[..., 2:3]
@@ -30,10 +30,7 @@ class FourierEdgeEmbed(nn.Module):
 
 
 class PsiForesight(nn.Module):
-    """
-    Edge-aware cross-attn from Z_current (keys/values) --> Z_pred (queries),
-    with edge features derived from (dx,dy,theta) 
-    """
+
     def __init__(self, z_dim: int, edge_dim: int = 64, n_heads: int = 8, ff_mult: int = 4, dropout: float = 0.0):
         super().__init__()
         assert z_dim % n_heads == 0, "z_dim must be divisible by n_heads"
@@ -45,11 +42,10 @@ class PsiForesight(nn.Module):
         self.q_proj = nn.Linear(z_dim, z_dim, bias=False)
         self.k_proj = nn.Linear(z_dim, z_dim, bias=False)
         self.v_proj = nn.Linear(z_dim, z_dim, bias=False)
-        self.e_proj = nn.Linear(edge_dim, z_dim, bias=False)  # add to K, like W5 * e_ij in Eq.(3). :contentReference[oaicite:2]{index=2}
+        self.e_proj = nn.Linear(edge_dim, z_dim, bias=False)  
 
         self.out = nn.Linear(z_dim, z_dim, bias=False)
 
-        # norm + ffn
         self.ln_q = nn.LayerNorm(z_dim)
         self.ln_o = nn.LayerNorm(z_dim)
         self.ff = nn.Sequential(
@@ -61,7 +57,6 @@ class PsiForesight(nn.Module):
 
         self.edge_enc = FourierEdgeEmbed(num_freqs=6, out_dim=edge_dim)
 
-        # optional learned gate (lets the layer decide how much to overwrite Z_pred)
         self.gate = nn.Sequential(nn.Linear(2 * z_dim, z_dim), nn.GELU(), nn.Linear(z_dim, 1))
 
     def _split_heads(self, x):  # [B,*,A,z] -> [B,*,A,h,hd]
@@ -80,10 +75,9 @@ class PsiForesight(nn.Module):
         return torch.softmax(logits, dim=dim)
 
     def forward(self,
-                z_current: torch.Tensor,          # [B, A, z]
-                z_pred: torch.Tensor,             # [B, T, A, z]
-                actions: torch.Tensor,            # [B, T, 4] -> (dx,dy,dtheta,state_action)
-                state_gate_from_action: bool = False  # if True, use the 4th action channel to gate updates
+                z_current: torch.Tensor,         
+                z_pred: torch.Tensor,            
+                actions: torch.Tensor,      
                 ) -> torch.Tensor:
         B, T, A, _ = z_pred.shape
         device = z_pred.device
@@ -93,14 +87,14 @@ class PsiForesight(nn.Module):
         zc = z_current.unsqueeze(1).expand(B, T, A, self.z)
 
         # Pre-norm queries (Z_pred)
-        q = self.q_proj(self.ln_q(z_pred))   # [B,T,A,z]
-        k = self.k_proj(zc)                  # [B,T,A,z]
-        v = self.v_proj(zc)                  # [B,T,A,z]
+        q = self.q_proj(self.ln_q(z_pred))  
+        k = self.k_proj(zc)                 
+        v = self.v_proj(zc)                 
 
 
         # add the same edge bias to every K_j at that t
-        e_bias = self.e_proj(self.edge_enc(actions[..., :3]))  # [B,T,edge_z]
-        e_bias = e_bias.unsqueeze(2).expand(B, T, A, self.z)   # [B,T,A,z]
+        e_bias = self.e_proj(self.edge_enc(actions[..., :3]))  
+        e_bias = e_bias.unsqueeze(2).expand(B, T, A, self.z)   
         k = k + e_bias
 
         # Split heads: [B,T,A,h,hd]
@@ -109,7 +103,6 @@ class PsiForesight(nn.Module):
         vh = self._split_heads(v)
 
         # attention over j (current agents) for each i (pred agents), per t
-        # logits: [B,T,A,i,h,hd] x [B,T,A,j,h,hd] -> [B,T,h,A_i,A_j]
         logits = torch.einsum('btaih,btajh->btahij',
                               qh.reshape(B,T,A,self.h,self.hd),
                               kh.reshape(B,T,A,self.h,self.hd)) / math.sqrt(self.hd)
@@ -117,23 +110,18 @@ class PsiForesight(nn.Module):
 
         attn = self._safe_softmax(logits, dim=-1)  # softmax over j
 
-        # weighted sum of values: [B,T,h,A_i,A_j] @ [B,T,A_j,h,hd] -> [B,T,h,A_i,hd]
         out_h = torch.einsum('btahij,btajh->btaih',
                              attn,
                              vh.reshape(B,T,A,self.h,self.hd))
         
-        out = self._merge_heads(out_h)  # [B,T,A,z]
+        out = self._merge_heads(out_h)  
         out = self.out(out)
         out = self.drop(out)
 
-        # learned residual gate (optionally modulated by action's state channel)
-        gate_inp = torch.cat([out, z_pred], dim=-1)  # [B,T,A,2z]
-        g = torch.sigmoid(self.gate(gate_inp))       # [B,T,A,1]
+        gate_inp = torch.cat([out, z_pred], dim=-1) 
+        g = torch.sigmoid(self.gate(gate_inp))      
 
-        if state_gate_from_action and actions.shape[-1] >= 4:
-            # Use state_action (0..1) as an extra multiplicative gate per (t).
-            sa = actions[..., 3:4].clamp(0, 1).unsqueeze(2).expand(B, T, A, 1)
-            g = g * sa
+
         # Residual + FFN
         z_mid = z_pred + g * out
         z_mid = self.ln_o(z_mid)
@@ -142,10 +130,7 @@ class PsiForesight(nn.Module):
 
 
 class IntraActionSelfAttn(nn.Module):
-    """
-    Self-attention over the A action/predicted nodes within each time step*.
-    Input/output: [B, T, A, z]
-    """
+
     def __init__(self, z_dim: int, n_heads: int = 8, ff_mult: int = 4, dropout: float = 0.0):
         super().__init__()
         assert z_dim % n_heads == 0
@@ -168,10 +153,7 @@ class IntraActionSelfAttn(nn.Module):
         self.drop = nn.Dropout(dropout)
 
     def forward(self, z_pred: torch.Tensor) -> torch.Tensor:
-        """
-        z_pred: [B, T, A, z]
-        returns: [B, T, A, z]
-        """
+ 
         B, T, A, Z = z_pred.shape
 
         x = self.ln(z_pred)
@@ -183,15 +165,15 @@ class IntraActionSelfAttn(nn.Module):
         scores = torch.einsum('btahd,btjhd->bthaj', q, k) / math.sqrt(self.hd)
 
         # attention over keys (last dim = j)
-        attn = scores.softmax(dim=-1)  # [B, T, h, A, A]
+        attn = scores.softmax(dim=-1)   
 
         # out_h: [B, T, A, h, hd]
         out_h = torch.einsum('bthaj,btjhd->btahd', attn, v)
         out = self.o(out_h.reshape(B, T, A, Z))
         out = self.drop(out)
 
-        x = z_pred + out                  # residual
+        x = z_pred + out                  
         y = self.ffn_ln(x)
-        y = x + self.ffn(y)               # FFN + residual
+        y = x + self.ffn(y)                
         return y
 

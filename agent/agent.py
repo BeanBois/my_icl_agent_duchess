@@ -77,17 +77,8 @@ class Agent(nn.Module):
         actions: Tensor = None,    # [B, T, 4] start guess; if None, zeros
         K: int = 5,                # number of refinement/DDIM steps
         keypoints: Tensor = None,
-        use_ddim: bool = True,
         ddim_steps: int = None     # override number of DDIM steps; default=K
     ) -> Tensor:
-        """
-        If use_ddim:
-        Interprets each refinement pass as a DDIM step in Lie-action space.
-        Uses self.alphas_cumprod (registered 1D tensor of length D) for schedule.
-        Else:
-        Falls back to your original K-pass rigid refinement.
-        Returns: [B, T, 4]
-        """
         device = curr_agent_info.device
         dtype  = curr_agent_info.dtype
         B = curr_agent_info.shape[0]
@@ -104,28 +95,18 @@ class Agent(nn.Module):
         else:
             T = actions.shape[1]
 
-        if not use_ddim:
-            # ---- your original loop here (unchanged) ----
-            for _ in range(K):
-                denoise = self.policy(curr_agent_info, curr_object_pos,
-                                    demo_agent_info, demo_object_pos, actions)  # [B,T,A,5]
-                a_ref   = self._svd_refine_once(actions, denoise, keypoints)
-                actions = a_ref
-            actions[..., 2] = _wrap_to_pi(actions[..., 2])
-            actions[..., 3:4] = actions[..., 3:4].clamp(0.0, 1.0)
-            return actions
 
-        # ----------------- DDIM mode -----------------
-        ab = self.alphas_cumprod.to(device=device, dtype=dtype)   # [D]
+        # DDIM mode
+        ab = self.alphas_cumprod.to(device=device, dtype=dtype)    
         D  = ab.numel()
         steps = int(ddim_steps or K)
         assert steps >= 1, "DDIM requires at least 1 step"
 
-        # Build t-schedule: D-1 -> 0 in 'steps' hops
-        t_sched = torch.linspace(D - 1, 0, steps=steps + 1, device=device).round().long()  # [steps+1]
+        # Build t-schedule
+        t_sched = torch.linspace(D - 1, 0, steps=steps + 1, device=device).round().long()   
 
-        # Start from current actions (interpreted as x_t); if you prefer pure noise, set actions ~ N
-        x_t = torch.cat([self._se2_log_cw(actions[..., :3]), actions[..., 3:4]], dim=-1)  # [B,T,4]
+        # Start from current actions 
+        x_t = torch.cat([self._se2_log_cw(actions[..., :3]), actions[..., 3:4]], dim=-1)   
 
         for s in range(steps):
             t      = t_sched[s].item()
@@ -135,16 +116,15 @@ class Agent(nn.Module):
             sqrt_ab_t  = ab_t.sqrt()
             sqrt1m_t   = (1 - ab_t).clamp_min(1e-12).sqrt()
 
-            # current noisy actions for conditioning
-            a_t = torch.cat([self._se2_exp_cw(x_t[..., :3]), x_t[..., 3:4]], dim=-1)  # [B,T,4]
+            a_t = torch.cat([self._se2_exp_cw(x_t[..., :3]), x_t[..., 3:4]], dim=-1)   
 
             # one-step denoise to get a0_hat
             denoise = self.policy(curr_agent_info, curr_object_pos,
-                                demo_agent_info, demo_object_pos, a_t, mode='eval')      # [B,T,A,5]
-            a0_hat  = self._svd_refine_once(a_t, denoise, keypoints)          # [B,T,4]
-            x0_hat  = torch.cat([self._se2_log_cw(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)  # [B,T,4]
+                                demo_agent_info, demo_object_pos, a_t, mode='eval')       
+            a0_hat  = self._svd_refine_once(a_t, denoise, keypoints)          
+            x0_hat  = torch.cat([self._se2_log_cw(a0_hat[..., :3]), a0_hat[..., 3:4]], dim=-1)   
 
-            # ε̂ and DDIM update
+            # eps and DDIM update
             eps_hat = (x_t - sqrt_ab_t * x0_hat) / (sqrt1m_t + 1e-12)
             x_t     = ab_prev.sqrt() * x0_hat + (1 - ab_prev).clamp_min(1e-12).sqrt() * eps_hat
 
@@ -157,63 +137,46 @@ class Agent(nn.Module):
 
     # get unnormalised noise and project to SE(2) to add noise 
     def add_action_noise(self, actions: torch.Tensor, t_int: torch.Tensor):
-        """
-        actions: [B,T,4] = (dx,dy,theta,state)  -- clean x_0 in action space
-        t_int:   [B,T] int timesteps (0..K-1)
-        returns:
-        noisy_actions [B,T,4]  (for conditioning),
-        eps_action    [B,T,3]  (the epsilon in tangential se(2) space: vx,vy,omega),
-        eps_state     [B,T]    (epsilon for state channel)
-        """
         B,T,_ = actions.shape
         dev, dt = actions.device, actions.dtype
 
-        # --- schedules ---
-        ab_all = self.alphas_cumprod.to(dev, dt)                # [K]
-        ab_t   = ab_all.gather(0, t_int.reshape(-1)).reshape(B,T)  # [B,T]
-        sqrt_ab_t  = ab_t.sqrt()                                 # [B,T]
-        sqrt1m_abt = (1.0 - ab_t).clamp_min(1e-12).sqrt()       # [B,T]
+        # schedules 
+        ab_all = self.alphas_cumprod.to(dev, dt)                 
+        ab_t   = ab_all.gather(0, t_int.reshape(-1)).reshape(B,T)   
+        sqrt_ab_t  = ab_t.sqrt()                                  
+        sqrt1m_abt = (1.0 - ab_t).clamp_min(1e-12).sqrt()        
 
-        # --- split action channels ---
-        transrot0 = actions[...,:3]     # (dx,dy,theta) clean x_0 in action space
-        state0    = actions[...,-1]     # clean gripper/state in [0,1] (or similar)
+        # split action channels 
+        transrot0 = actions[...,:3]     
+        state0    = actions[...,-1]    
 
-        # --- go to tangent: x0 = log( SE2(transrot0) ) ---
-        # x0: [B,T,3] (vx,vy,omega) representing the same SE(2) increment as (dx,dy,theta)
-        x0 = self._se2_log_cw(transrot0)         # you already import se2_log
+        # go to tangent: x0 = log( SE2(transrot0) ) 
+        x0 = self._se2_log_cw(transrot0)        
+        # sample epsilons 
+        eps_action = torch.randn(B,T,3, device=dev, dtype=dt)    
+        eps_state  = torch.randn(B,T,  device=dev, dtype=dt)     
 
-        # --- sample epsilons ---
-        eps_action = torch.randn(B,T,3, device=dev, dtype=dt)   # N(0,I) in se(2)
-        eps_state  = torch.randn(B,T,  device=dev, dtype=dt)    # N(0,1)
+        # closed-form forward: x_t = sqrt(ab)*x0 + sqrt(1-ab)*eps 
+        x_t = sqrt_ab_t.unsqueeze(-1) * x0 + sqrt1m_abt.unsqueeze(-1) * eps_action   
 
-        # --- closed-form forward: x_t = sqrt(ab)*x0 + sqrt(1-ab)*eps ---
-        x_t = sqrt_ab_t.unsqueeze(-1) * x0 + sqrt1m_abt.unsqueeze(-1) * eps_action  # [B,T,3]
-
-        # --- map back to action space ---
-        transrot_t = self._se2_exp_cw(x_t)        # [B,T,3] => (dx,dy,theta) at step t
+        # map back to action space 
+        transrot_t = self._se2_exp_cw(x_t)         
         # keep theta in (-pi,pi]
         transrot_t[...,2] = ((transrot_t[...,2] + torch.pi) % (2*torch.pi)) - torch.pi
 
-        # --- state diffusion in R ---
-        state_t = sqrt_ab_t * state0 + sqrt1m_abt * eps_state   # [B,T]
+        # state diffusion in R 
+        state_t = sqrt_ab_t * state0 + sqrt1m_abt * eps_state    
         state_t = state_t.clamp(0.0, 1.0)
 
-        noisy_actions = torch.cat([transrot_t, state_t.unsqueeze(-1)], dim=-1)  # [B,T,4]
+        noisy_actions = torch.cat([transrot_t, state_t.unsqueeze(-1)], dim=-1)   
         return noisy_actions, eps_action, eps_state
 
     def _unnormalise_denoising_directions(self, x, kp_norms):
-        # scale translation + per-node disp by length; keep state as-is
         return torch.cat([x[..., :2] * self.max_translation,
                         x[..., 2:4] * (self.max_rotation * kp_norms[None,None,:,None]),
                         x[..., 4:5]], dim=-1)
 
     def _svd_refine_once(self, actions: Tensor, denoise: Tensor, keypoints: Tensor) -> Tensor:
-        """
-        actions: [B,T,4]  (dx,dy,theta,state)
-        denoise: [B,T,A,5] (tx,ty, dx_i,dy_i, ds)  -- your head’s layout
-        keypoints: [A,2] (if None, uses self.keypoints or a small cross)
-        returns: refined actions a0_hat [B,T,4]
-        """
         device, dtype = actions.device, actions.dtype
         B, T, _ = actions.shape
         A = denoise.shape[2]
@@ -222,80 +185,62 @@ class Agent(nn.Module):
         kp0 = keypoints
         kp = kp0.view(1,1,A,2).expand(B,T,A,2)
 
-        dxdy = actions[..., :2]           # [B,T,2]
-        th   = actions[..., 2:3]          # [B,T,1]
-        st   = actions[..., 3:4]          # [B,T,1]
+        dxdy = actions[..., :2]           
+        th   = actions[..., 2:3]          
+        st   = actions[..., 3:4]          
 
         c = torch.cos(th); s = torch.sin(th)
         kx, ky = kp[..., 0], kp[..., 1]
         Rx = c * kx + s * ky
         Ry = - s * kx + c * ky
 
-        # Rx = c * kx - s * ky
-        # Ry = s * kx + c * ky
-        P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)  # [B,T,A,2]
+        P  = torch.stack([Rx, Ry], dim=-1) + dxdy.unsqueeze(2)   
 
         # denoise split
         kp_norms = kp0.norm(dim = -1)
-        denoise = self._unnormalise_denoising_directions(denoise, kp_norms)  # make sure this scales tx/ty & disp
-        t_bias  = denoise[..., :2].mean(dim=2, keepdim=True)       # [B,T,1,2]
-        disp    = denoise[..., 2:4]                                # [B,T,A,2]
+        denoise = self._unnormalise_denoising_directions(denoise, kp_norms)  
+        t_bias  = denoise[..., :2].mean(dim=2, keepdim=True)        
+        disp    = denoise[..., 2:4]                                 
         Q       = P + disp + t_bias
 
         # Procrustes (vectorized)
         muP = P.mean(dim=2, keepdim=True)
         muQ = Q.mean(dim=2, keepdim=True)
         X, Y = P - muP, Q - muQ
-        # H00 = (X[...,0]*Y[...,0]).sum(dim=2); H01 = (X[...,0]*Y[...,1]).sum(dim=2)
-        # H10 = (X[...,1]*Y[...,0]).sum(dim=2); H11 = (X[...,1]*Y[...,1]).sum(dim=2)
-        # H = torch.stack([torch.stack([H00,H01],dim=-1),
-        #                 torch.stack([H10,H11],dim=-1)], dim=-2)        # [B,T,2,2]
-        H = torch.einsum('btai,btaj->btij', X, Y)  # [B,T,2,2]
+        H = torch.einsum('btai,btaj->btij', X, Y)   
 
         U, S, Vh = torch.linalg.svd(H)
         # det correction
         Rtmp = U @ Vh
-        det = torch.det(Rtmp)                             # [B,T]
+        det = torch.det(Rtmp)                              
         sign = torch.where(det < 0, -torch.ones_like(det), torch.ones_like(det))
-        Sfix = torch.zeros_like(Rtmp)  # [B,T,2,2]
+        Sfix = torch.zeros_like(Rtmp)   
         Sfix[..., 0, 0] = 1.0
         Sfix[..., 1, 1] = sign
         R = U @ Sfix @ Vh
 
-        # dtheta = torch.atan2(R[...,1,0], R[...,0,0]).unsqueeze(-1)    # [B,T,1]
         dtheta = torch.atan2(R[...,0,1], R[...,0,0]).unsqueeze(-1)   
 
-        # translation t = muQ - R*muP
-        Rp = torch.einsum('btij,btaj->btai', R, muP.expand_as(P))    # [B,T,A,2]
-        t  = (muQ - Rp).mean(dim=2)                                   # [B,T,2]
+        Rp = torch.einsum('btij,btaj->btai', R, muP.expand_as(P))     
+        t  = (muQ - Rp).mean(dim=2)                                   
 
         dxdy_hat = dxdy + t
         th_hat   = _wrap_to_pi(th.squeeze(-1) + dtheta.squeeze(-1)).unsqueeze(-1)
         s_hat    = (st + denoise[..., 4:5].mean(dim=2)).clamp(0.0, 1.0)
-        return torch.cat([dxdy_hat, th_hat, s_hat], dim=-1)           # [B,T,4]
+        return torch.cat([dxdy_hat, th_hat, s_hat], dim=-1)           
 
     def _se2_log_cw(self, vec: torch.Tensor) -> torch.Tensor:
-        """
-        vec: [...,3] = (dx,dy,theta_CW)
-        returns twist xi_CW = (vx,vy,omega_CW)
-        Implemented by converting to CCW, calling se2_log (CCW), then converting back.
-        """
         dx, dy, th_cw = vec[..., 0], vec[..., 1], vec[..., 2]
         vec_ccw = torch.stack([dx, dy, -th_cw], dim=-1)
-        xi_ccw = se2_log(vec_ccw)           # your existing utility (CCW)
+        xi_ccw = se2_log(vec_ccw)           
         vx, vy, om_ccw = xi_ccw[..., 0], xi_ccw[..., 1], xi_ccw[..., 2]
         xi_cw = torch.stack([vx, vy, -om_ccw], dim=-1)
         return xi_cw
 
     def _se2_exp_cw(self, xi: torch.Tensor) -> torch.Tensor:
-        """
-        xi: [...,3] = (vx,vy,omega_CW)
-        returns vec: (dx,dy,theta_CW)
-        Implemented via CCW exp + conversion.
-        """
         vx, vy, om_cw = xi[..., 0], xi[..., 1], xi[..., 2]
         xi_ccw = torch.stack([vx, vy, -om_cw], dim=-1)
-        vec_ccw = se2_exp(xi_ccw)           # your existing utility (CCW)
+        vec_ccw = se2_exp(xi_ccw)           
         dx, dy, th_ccw = vec_ccw[..., 0], vec_ccw[..., 1], vec_ccw[..., 2]
         vec_cw = torch.stack([dx, dy, -th_ccw], dim=-1)
         return vec_cw

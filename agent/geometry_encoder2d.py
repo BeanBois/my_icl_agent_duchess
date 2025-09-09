@@ -1,3 +1,4 @@
+# Boilerplat codes by chatgpt
 from __future__ import annotations
 import math
 from typing import Tuple
@@ -11,21 +12,10 @@ from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
 
-from utilities import furthest_point_sampling_2d, knn_indices, fourier_feats_2d
+from utilities import furthest_point_sampling_2d, knn_indices, fourier_embed_2d
 
 
 class Geo2DEncoder(nn.Module):
-    """
-    2D-local encoder that mirrors the Instant Policy geometry-encoder contract:
-    Input:  P [N,2]  (dense 2D points in the current frame)
-    Output: F [M,D], C [M,2]  (node features F^i and centroid positions p^i)
-
-    Recipe (all 2D):
-      - FPS to pick M centroids (coverage)
-      - kNN/radius neighborhood per centroid
-      - Per-point descriptors: Δx, r, (sinθ,cosθ), 2D Fourier features on Δx
-      - Small MLP -> (max, mean) pool -> stats -> feature head
-    """
     def __init__(
         self,
         M: int = 16,
@@ -39,7 +29,6 @@ class Geo2DEncoder(nn.Module):
         self.fourier_L = fourier_L
 
         # Per-neighbor descriptor size:
-        # Δx(2) + r(1) + sinθ(1) + cosθ(1) + fourier(4*L)
         in_ch = 2 + 1 + 1 + 1 + (4 * fourier_L)
 
         self.per_point = nn.Sequential(
@@ -47,7 +36,7 @@ class Geo2DEncoder(nn.Module):
             nn.Linear(64, 128),   nn.GELU(),
         )
 
-        # We concat max-pooled [128] + mean-pooled [128] + local stats [4]
+        # concat max-pooled [128] + mean-pooled [128] + local stats [4]
         self.out_head = nn.Sequential(
             nn.Linear(128 * 2 + 4, 128), nn.GELU(),
             nn.Linear(128, out_dim),
@@ -60,19 +49,19 @@ class Geo2DEncoder(nn.Module):
     def _encode_patch(self, P: torch.Tensor, c_xy: torch.Tensor) -> torch.Tensor:
         # kNN
         nidx = knn_indices(P, c_xy, self.k)
-        patch = P[nidx]                        # [k,2]
-        delta = patch - c_xy[None, :]         # [k,2]
+        patch = P[nidx]                    
+        delta = patch - c_xy[None, :]      
 
         # polar bits
-        r = torch.linalg.norm(delta, dim=-1, keepdim=True)  # [k,1]
-        theta = torch.atan2(delta[:, 1:2], delta[:, 0:1])   # [k,1]
-        st, ct = torch.sin(theta), torch.cos(theta)         # [k,1] each
+        r = torch.linalg.norm(delta, dim=-1, keepdim=True) 
+        theta = torch.atan2(delta[:, 1:2], delta[:, 0:1])  
+        st, ct = torch.sin(theta), torch.cos(theta)        
 
         # fourier on delta
-        ff = fourier_feats_2d(delta, self.fourier_L)        # [k, 4*L]
+        ff = fourier_embed_2d(delta, self.fourier_L)       
 
-        per_pt = torch.cat([delta, r, st, ct, ff], dim=-1)  # [k, in_ch]
-        h = self.per_point(per_pt)                          # [k,128]
+        per_pt = torch.cat([delta, r, st, ct, ff], dim=-1) 
+        h = self.per_point(per_pt)                         
         h_max = h.max(dim=0).values
         h_mean = h.mean(dim=0)
 
@@ -82,18 +71,13 @@ class Geo2DEncoder(nn.Module):
             r.max().squeeze(),
             r.min().squeeze(),
             (r.std().squeeze() if r.numel() > 1 else torch.tensor(0.0, device=P.device)),
-        ], dim=0)  # [4]
+        ], dim=0)  
 
-        feat = self.out_head(torch.cat([h_max, h_mean, stats], dim=0))  # [out_dim]
+        feat = self.out_head(torch.cat([h_max, h_mean, stats], dim=0))  
         return feat
 
     def forward(self, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        P: [N,2] float tensor (dense 2D points)
-        Returns:
-          F: [M,D] features
-          C: [M,2] centroid positions
-        """
+
         assert P.ndim == 2 and P.shape[-1] == 2, "Geo2DEncoder expects P of shape [N,2]"
         N = P.shape[0]
         if N == 0:
@@ -101,28 +85,25 @@ class Geo2DEncoder(nn.Module):
             device = P.device
             return torch.zeros(self.M, 128, device=device), torch.zeros(self.M, 2, device=device)
 
-        c_idx = self._centroids(P)  # [M]
-        C = P[c_idx]                # [M,2]
+        c_idx = self._centroids(P) 
+        C = P[c_idx]               
 
         feats = []
         for i in range(C.shape[0]):
             feats.append(self._encode_patch(P, C[i]))
-        F_out = torch.stack(feats, dim=0)  # [M, D]
+        F_out = torch.stack(feats, dim=0)  
         return F_out, C
 
 
 # Public wrapper
 class GeometryEncoder(nn.Module):
-    """
-    Public API for policy
-    """
+
     def __init__(
         self,
         M: int = 16,
         k: int = 64,
         fourier_L: int = 6,
-        out_dim: int = 128,
-        **kwargs
+        out_dim: int = 128
     ):
         super().__init__()
         self.impl = Geo2DEncoder(M=M, k=k, fourier_L=fourier_L, out_dim=out_dim)
@@ -140,9 +121,9 @@ class PatchDecoder(nn.Module):
             nn.Linear(in_dim, 256), nn.GELU(),
             nn.Linear(256, h * w)
         )
-    def forward(self, F_nodes):                # [B*M, D] or [M, D]
-        logits = self.net(F_nodes)             # [*, H*W]
-        return logits.view(-1, self.h, self.w) # [*, H, W]
+    def forward(self, F_nodes):                
+        logits = self.net(F_nodes)             
+        return logits.view(-1, self.h, self.w) 
 
 
 # Config
@@ -183,7 +164,6 @@ class PointCloud2DDataset(Dataset):
 
     def __getitem__(self, idx):
         P = self.clouds[idx].copy()
-        # --- light 2D augs ---
         # jitter
         P += np.random.normal(0.0, JITTER_STD, size=P.shape).astype(np.float32)
         # small random rotation
@@ -194,7 +174,6 @@ class PointCloud2DDataset(Dataset):
         return torch.from_numpy(P)  # [N,2]
 
 def collate_clouds(batch):
-    # batch is a list of [N_i, 2] tensors; we keep variable sizes
     return batch
 
 
@@ -208,18 +187,15 @@ def _knn(P, q, k):
 
 @torch.no_grad()
 def rasterize_patch(P, center, k=K_NEIGHBORS, H=PATCH_H, W=PATCH_W, pad=1.1):
-    """
-    Make a binary occupancy grid around `center` using its kNN.
-    We scale the local neighborhood to fill the grid (with small pad).
-    """
-    idx = _knn(P, center, k)                # [k]
-    patch = P[idx]                          # [k,2]
-    delta = patch - center[None, :]         # [k,2]
+
+    idx = _knn(P, center, k)               
+    patch = P[idx]                         
+    delta = patch - center[None, :]        
 
     # Scale to grid: fit to [-1,1] box with a small padding
     max_abs = torch.max(torch.abs(delta)) + 1e-6
     scale = pad * max_abs
-    norm = delta / scale                    # in [-~1, ~1]
+    norm = delta / scale                   
 
     # Map to pixel coords
     xs = ((norm[:, 0] + 1) * 0.5) * (W - 1)
@@ -246,26 +222,24 @@ def train_epoch(encoder, decoder, loader, optim):
         for P in clouds:
             P = P.to(device)
             # 1) Get M nodes (features + positions)
-            F_nodes, C = encoder(P)  # [M,D], [M,2]
+            F_nodes, C = encoder(P)   
 
             # 2) Build raster target per centroid (no grad)
             grids = []
             for i in range(C.shape[0]):
                 g = rasterize_patch(P, C[i], k=encoder.k, H=PATCH_H, W=PATCH_W)
                 grids.append(g)
-            T = torch.stack(grids, dim=0)     # [M,H,W]
+            T = torch.stack(grids, dim=0)     
 
-            feats_all.append(F_nodes)          # [M,D]
-            targs_all.append(T)                # [M,H,W]
+            feats_all.append(F_nodes)         
+            targs_all.append(T)               
 
-        F_batch = torch.cat(feats_all, dim=0)  # [B*M, D]
-        Y_batch = torch.cat(targs_all, dim=0)  # [B*M, H, W]
+        F_batch = torch.cat(feats_all, dim=0) 
+        Y_batch = torch.cat(targs_all, dim=0) 
 
         # 3) Predict grids
-        logits = decoder(F_batch)              # [B*M, H, W]
+        logits = decoder(F_batch)             
         loss_rec = bce(logits, Y_batch)
-
-        # optional tiny L2 on features for stability
         loss = loss_rec
 
         optim.zero_grad(set_to_none=True)

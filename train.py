@@ -1,3 +1,4 @@
+# boilerplate code by chatgpt, edited for my use
 import os
 import math
 import json
@@ -16,7 +17,7 @@ import numpy as np
 # Data interface (stub)
 @dataclass
 class Item:
-    # Shapes must match your policy.forward signature
+    # Shapes must match policy.forward signature
     curr_agent_info: torch.Tensor       # [B, A, 6]
     curr_object_pos: torch.Tensor       # [B, M, 2]
     clean_actions: torch.Tensor         # [B, T, 4] 
@@ -47,7 +48,7 @@ class PseudoDemoDataset(Dataset):
 
     def __getitem__(self, idx) -> Item:
         B, A, M, N, L, T, ad = self.B, self.A, self.M, self.N, self.L, self.T, self.action_dim
-        # Dummy random sample — replace with your real loading logic.
+        # init
         curr_agent_info = torch.randn(B, A, 6)
         curr_object_pos = torch.randn(B, M, 2)
         clean_actions   = torch.randn(B, T, ad)
@@ -58,7 +59,6 @@ class PseudoDemoDataset(Dataset):
 
         
         curr_obs, context, _clean_actions = self.data_gen.get_batch_samples(self.B)
-        # _offset_index = random.randint(0,len(curr_obs[0]) - 1) if len(curr_obs[0]) > 0 else 0
         curr_agent_info, curr_object_pos = self._process_obs(curr_obs)
         demo_agent_info, demo_object_pos, demo_agent_action = self._process_context(context)
         clean_actions = self._process_actions(_clean_actions)
@@ -76,20 +76,12 @@ class PseudoDemoDataset(Dataset):
         )
 
     def _process_obs(self, curr_obs: List[Dict]):
-        """
-        curr_obs: list length B. Each element is a list of observation dicts
-                  (from PDGen._get_ground_truth: 'curr_obs_set').
-        We take the FIRST obs of each sample as the 'current' one and turn it
-        into tensors:
-          - curr_agent_info: [B, A=4, 6] with [x,y,orientation,state,time,done]
-          - curr_object_pos: [B, M, 2]  sampled coords
-        """
         B, A, M = self.B, self.A, self.M
         device = self.device
 
         # fixed keypoint order (matches 4 nodes expected by A=4)
         kp_local = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]  # local-frame offsets
-        kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  # [4,2]
+        kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  
 
         all_agent_infos = []
         all_obj_coords = []
@@ -98,8 +90,6 @@ class PseudoDemoDataset(Dataset):
             obj_coords = []
 
             for b in range(B):
-                # Use the first "current" obs for this sample
-
                 ob = curr_obs[b][i] if isinstance(curr_obs[b], list) else curr_obs[b]
 
                 # Scalars
@@ -107,18 +97,14 @@ class PseudoDemoDataset(Dataset):
                 ori_deg = float(ob["agent-orientation"])
                 ori_rad = math.radians(ori_deg)
                 st = ob["agent-state"]
-                st_val = float(getattr(st, "value", st))  # enum -> int if needed
+                st_val = float(getattr(st, "value", st))   
                 t_val = float(ob["time"])
                 done_val = float(bool(ob["done"]))
 
                 # Rotate local KPs to world and translate by agent center
-                # c, s = math.cos(ori_rad), math.sin(ori_rad)
-                # R = torch.tensor([[c, -s],
-                #                 [s,  c]], dtype=torch.float32, device=device)     # [2,2]
-                # kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)  # [4,2]
                 c, s = math.cos(ori_rad), math.sin(ori_rad)
                 R = torch.tensor([[ c,  s],
-                                [-s,  c]], dtype=torch.float32, device=device)   # CW ✅
+                                [-s,  c]], dtype=torch.float32, device=device)   
                 kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], device=device)
 
                 # Pack [x,y,orientation,state,time,done] per keypoint
@@ -126,11 +112,11 @@ class PseudoDemoDataset(Dataset):
                 stt = torch.full((A, 1), st_val, dtype=torch.float32, device=device)
                 tt = torch.full((A, 1), t_val, dtype=torch.float32, device=device)
                 dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
-                agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
+                agent_info = torch.cat([kp_world, o, stt, tt, dd], dim=1)  
                 agent_infos.append(agent_info)
 
-                # Object coords → pick exactly M 2D points
-                coords_np = ob["coords"]  # numpy array [K,2] (possibly K != M)
+                # Downsample pc
+                coords_np = ob["coords"]   
                 K = int(coords_np.shape[0])
                 if K == 0:
                     # nothing detected → zeros
@@ -148,28 +134,20 @@ class PseudoDemoDataset(Dataset):
             all_agent_infos.append(agent_infos_tensor)
             all_obj_coords.append(obj_info_tensor)
             
-            curr_agent_info = torch.stack(all_agent_infos, dim=0)  # [K,B,4,6]
-            curr_object_pos = torch.stack(all_obj_coords, dim=0)  # [K,B,M,2]
+            curr_agent_info = torch.stack(all_agent_infos, dim=0) 
+            curr_object_pos = torch.stack(all_obj_coords, dim=0)  
         return curr_agent_info, curr_object_pos
 
     def _process_actions(self, _clean_actions: List[List[torch.Tensor]]):
-        """
-        _clean_actions: list length B; each element is a LIST of length >=1,
-                        where each entry is a [T, 10] tensor:
-                          9 numbers = row-major SE(2) (3x3), then 1 gripper/state.
-        We return [B, T, 3] with (tx, ty, theta) for the FIRST horizon sequence.
-        """
         B, T = self.B, self.T
         device = self.device
 
         def mat_to_vec(m9: torch.Tensor) -> torch.Tensor:
-            # m9 [9] row-major -> tx,ty,theta(rad)
             M = m9.view(3, 3)
             tx = M[0, 2]
             ty = M[1, 2]
-            # theta = torch.atan2(M[1, 0], M[0, 0])
-            theta = torch.atan2(M[0, 1], M[0, 0])          #
-            return torch.stack([tx, ty, theta], dim=0)  # [3]
+            theta = torch.atan2(M[0, 1], M[0, 0])          
+            return torch.stack([tx, ty, theta], dim=0)  
 
         num_action_sets = len(_clean_actions[0])
         all_out = []
@@ -177,8 +155,8 @@ class PseudoDemoDataset(Dataset):
             out = []
             for b in range(B):
                 # take the offset_index pred-horizon sequence for this sample
-                seq = _clean_actions[b][i]  # [T, 10] on same device as generator set
-                # Robustness: pad/truncate to T if needed
+                seq = _clean_actions[b][i]  
+                # pad/truncate to T if needed
                 Tb = seq.shape[0]
                 if Tb < T:
                     pad = torch.zeros((T - Tb, seq.shape[1]), dtype=seq.dtype, device=seq.device)
@@ -194,29 +172,20 @@ class PseudoDemoDataset(Dataset):
                     _vec = mat_to_vec(m9)
                     vec = torch.concat([_vec,state_action])
                     vecs.append(vec)
-                vecs = torch.stack(vecs, dim=0).to(device)  # [T,3]
+                vecs = torch.stack(vecs, dim=0).to(device)  
                 out.append(vecs)
             out_tensor = torch.stack(out, dim = 0)
             all_out.append(out_tensor)
 
-        return torch.stack(all_out, dim=0)  # [K,B,T,3]
+        return torch.stack(all_out, dim=0)  
 
     def _process_context(self, context: List[Tuple]):
-        """
-        context: list length B; each element is a LIST of N demos.
-                 Each demo is (observations, actions) where:
-                   - observations: list length L of obs dicts (already downsampled in PDGen)
-                   - actions: tensor [L-1, 10] (accumulated, already downsampled in PDGen)
-        Returns:
-          demo_agent_info  : [B, N, L, A=4, 6]
-          demo_object_pos  : [B, N, L, M, 2]
-          demo_agent_action: [B, N, L-1, 3]  (tx, ty, theta)
-        """
+
         B, N, L, A, M = self.B, self.N, self.L, self.A, self.M
         device = self.device
 
         kp_local = [PseudoDemoGenerator.agent_keypoints[k] for k in PseudoDemoDataset.kp_order]
-        kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  # [4,2]
+        kp_local = torch.tensor(kp_local, dtype=torch.float32, device=device)  
 
         # Containers
         all_demo_agent_info = []
@@ -235,21 +204,20 @@ class PseudoDemoDataset(Dataset):
             c, s = math.cos(ori_rad), math.sin(ori_rad)
             R = torch.tensor([[c, -s],
                               [s,  c]], dtype=torch.float32, device=device)
-            kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], dtype=torch.float32, device=device)  # [4,2]
+            kp_world = (kp_local @ R.T) + torch.tensor([cx, cy], dtype=torch.float32, device=device)  
 
             o = torch.full((A, 1), ori_deg, dtype=torch.float32, device=device)
             stt = torch.full((A, 1), st_val, dtype=torch.float32, device=device)
             tt = torch.full((A, 1), t_val, dtype=torch.float32, device=device)
             dd = torch.full((A, 1), done_val, dtype=torch.float32, device=device)
-            return torch.cat([kp_world, o, stt, tt, dd], dim=1)  # [4,6]
+            return torch.cat([kp_world, o, stt, tt, dd], dim=1)   
 
         def mat_to_vec(m9: torch.Tensor) -> torch.Tensor:
             M = m9.view(3, 3)
             tx = M[0, 2]
             ty = M[1, 2]
-            # theta = torch.atan2(M[1, 0], M[0, 0])
-            theta = torch.atan2(M[0, 1], M[0, 0])          # CW 
-            return torch.stack([tx, ty, theta], dim=0)  # [3]
+            theta = torch.atan2(M[0, 1], M[0, 0])          
+            return torch.stack([tx, ty, theta], dim=0)  
 
         for b in range(B):
             demos = context[b]  # list of N demos
@@ -260,8 +228,7 @@ class PseudoDemoDataset(Dataset):
             demo_acts = []
 
             for n in range(N):
-                observations, actions = demos[n]  # observations: list L; actions: [L-1,10] torch
-                # Observations → [L, A, 6] and [L, M, 2]
+                observations, actions = demos[n]  
                 agent_info_steps = []
                 obj_steps = []
                 for l in range(L):
@@ -284,11 +251,10 @@ class PseudoDemoDataset(Dataset):
                         sel = torch.tensor(coords_np[idx], dtype=torch.float32, device=device)
                     obj_steps.append(sel)
 
-                demo_infos.append(torch.stack(agent_info_steps, dim=0))  # [L,4,6]
-                demo_objs.append(torch.stack(obj_steps, dim=0))          # [L,M,2]
+                demo_infos.append(torch.stack(agent_info_steps, dim=0))  
+                demo_objs.append(torch.stack(obj_steps, dim=0))          
 
-                # Actions → [L-1, 3]
-                act = actions  # [L-1,10]
+                act = actions 
                 # robust pad/truncate to L-1 in case
                 if act.shape[0] < L - 1:
                     pad = torch.zeros((L - 1 - act.shape[0], act.shape[1]),
@@ -299,51 +265,38 @@ class PseudoDemoDataset(Dataset):
 
                 vecs = []
                 for i in range(act.shape[0]):
-                    vecs.append(mat_to_vec(act[i, :9].to(device)))  # [3]
-                demo_acts.append(torch.stack(vecs, dim=0))  # [L-1,3]
+                    vecs.append(mat_to_vec(act[i, :9].to(device)))   
+                demo_acts.append(torch.stack(vecs, dim=0)) 
 
-            all_demo_agent_info.append(torch.stack(demo_infos, dim=0))  # [N,L,4,6]
-            all_demo_obj.append(torch.stack(demo_objs, dim=0))          # [N,L,M,2]
-            all_demo_act.append(torch.stack(demo_acts, dim=0))          # [N,L-1,3]
+            all_demo_agent_info.append(torch.stack(demo_infos, dim=0)) 
+            all_demo_obj.append(torch.stack(demo_objs, dim=0))         
+            all_demo_act.append(torch.stack(demo_acts, dim=0))         
 
-        demo_agent_info = torch.stack(all_demo_agent_info, dim=0)  # [B,N,L,4,6]
-        demo_object_pos = torch.stack(all_demo_obj, dim=0)         # [B,N,L,M,2]
-        demo_agent_action = torch.stack(all_demo_act, dim=0)       # [B,N,L-1,3]
+        demo_agent_info = torch.stack(all_demo_agent_info, dim=0)  
+        demo_object_pos = torch.stack(all_demo_obj, dim=0)         
+        demo_agent_action = torch.stack(all_demo_act, dim=0)       
         return demo_agent_info, demo_object_pos, demo_agent_action
 
 def collate_items(batch: List[Item]) -> Item:
-    # Here each dataset __getitem__ already returns batched B samples;
-    # if yours returns single samples, stack along dim 0 here.
     assert len(batch) == 1, "This stub returns batch-already tensors; adjust as needed."
     return batch[0]
 
 
 # Losses
 class PerNodeDenoisingMSELoss(nn.Module):
-    """
-    ------
-    clean_actions : [B, T, 4]  -> (dx, dy, dtheta_rad, state)
-    noisy_actions : [B, T, 4]  -> (dx, dy, dtheta_rad, state)
-    pred_eps      : [B, T, A, 5]  predicted per-node denoising (Δt_x, Δt_y, Δr_x, Δr_y, Δs)
-    keypoints     : [A, 2] (optional) agent/gripper keypoints in its local frame, centred.
 
-    Returns
-    -------
-    loss : scalar tensor (mean MSE over B*T*A*5)
-    """
-
-    def __init__(self, pos_scale, rot_scale, reduction: str = "mean"):
+    def __init__(self, pos_scale, rot_scale, reduction: str = "sum"):
         super().__init__()
         self.reduction = reduction
         self.pos_scale = pos_scale
         self.rad_scale = math.radians(rot_scale)
-        self.mse = nn.MSELoss(reduction=reduction)  # we average at the very end
+        self.mse = nn.MSELoss(reduction=reduction) 
 
     @staticmethod
     def _default_keypoints(device, dtype):
         kp = [PseudoDemoDataset.agent_kp[k] for k in PseudoDemoDataset.kp_order]
         pts = torch.tensor(kp, device=device, dtype=dtype)
-        return pts  # [A,2]
+        return pts   
 
     def forward(
         self,
@@ -363,7 +316,7 @@ class PerNodeDenoisingMSELoss(nn.Module):
         dtype  = clean_actions.dtype
 
         if keypoints is None:
-            keypoints = self._default_keypoints(device, dtype)  # [A,2]
+            keypoints = self._default_keypoints(device, dtype)  
         else:
             assert keypoints.shape == (A, 2), f"keypoints must be [A,2], got {tuple(keypoints.shape)}"
             keypoints = keypoints.to(device=device, dtype=dtype)
@@ -372,26 +325,13 @@ class PerNodeDenoisingMSELoss(nn.Module):
         dx_c, dy_c, th_c, s_c = clean_actions[..., 0], clean_actions[..., 1], clean_actions[..., 2], clean_actions[..., 3]
         dx_n, dy_n, th_n, s_n = noisy_actions[..., 0], noisy_actions[..., 1], noisy_actions[..., 2], noisy_actions[..., 3]
 
-        # --- Translation delta (same for all nodes) --------------------------
-        # Δt = t_clean - t_noisy
-        dt_x = dx_c - dx_n     # [B,T]
-        dt_y = dy_c - dy_n     # [B,T]
+        # Translation delta (same for all nodes) 
+        dt_x = dx_c - dx_n    
+        dt_y = dy_c - dy_n    
 
-        # --- Rotation-around-centre delta (node-dependent) ------------------
-        # Δr(node) = R_clean p_kp - R_noisy p_kp, for each node
-        # Build R(θ) for clean and noisy: [B,T,2,2]
+        # Rotation-around-centre delta (node-dependent) 
         cos_c, sin_c = torch.cos(th_c), torch.sin(th_c)
         cos_n, sin_n = torch.cos(th_n), torch.sin(th_n)
-
-        # R_c = torch.stack([
-        #     torch.stack([ cos_c, -sin_c], dim=-1),
-        #     torch.stack([ sin_c,  cos_c], dim=-1)
-        # ], dim=-2)  # [B,T,2,2]
-        # R_n = torch.stack([
-        #     torch.stack([ cos_n, -sin_n], dim=-1),
-        #     torch.stack([ sin_n,  cos_n], dim=-1)
-        # ], dim=-2)  # [B,T,2,2]
-
 
         R_c = torch.stack([
             torch.stack([ cos_c, sin_c], dim=-1),
@@ -404,34 +344,31 @@ class PerNodeDenoisingMSELoss(nn.Module):
 
 
         # Apply to keypoints
-        # keypoints: [A,2] -> broadcast to [B,T,A,2]
-        kp = keypoints.view(1, 1, A, 2).expand(B, T, A, 2)  # [B,T,A,2]
+        kp = keypoints.view(1, 1, A, 2).expand(B, T, A, 2) 
 
         # (R @ p): [B,T,2,2] @ [B,T,A,2] -> [B,T,A,2]
-        # do via einsum for clarity
-        Rp_c = torch.einsum('btij,btaj->btai', R_c, kp)  # [B,T,A,2]
-        Rp_n = torch.einsum('btij,btaj->btai', R_n, kp)  # [B,T,A,2]
+        Rp_c = torch.einsum('btij,btaj->btai', R_c, kp) 
+        Rp_n = torch.einsum('btij,btaj->btai', R_n, kp) 
 
-        dr = Rp_c - Rp_n  # [B,T,A,2] -> per-node rotation component (Δr_x, Δr_y)
+        dr = Rp_c - Rp_n  # per-node rotation component (dr_x, dr_y)
 
-        # --- Gripper state delta --------------------------------------------
-        ds = (s_c - s_n)  # [B,T]
+        # Gripper state delta 
+        ds = (s_c - s_n)  
 
-        # --- Assemble GT epsilon per node -----------------------------------
-        # ε*_k[node] = [Δt_x, Δt_y, Δr_x(node), Δr_y(node), Δs]
+        # Assemble GT epsilon per node 
+        # eps*_k[node] = [dt_x, dt_y, dr_x(node), dr_y(node), ds]
         # Broadcast translation and state deltas across nodes:
-        dt = torch.stack([dt_x, dt_y], dim=-1).unsqueeze(2).expand(B, T, A, 2)  # [B,T,A,2]
-        ds_exp = ds.unsqueeze(-1).unsqueeze(-1).expand(B, T, A, 1)              # [B,T,A,1]
+        dt = torch.stack([dt_x, dt_y], dim=-1).unsqueeze(2).expand(B, T, A, 2)  
+        ds_exp = ds.unsqueeze(-1).unsqueeze(-1).expand(B, T, A, 1)              
 
-        eps_gt = torch.cat([dt, dr, ds_exp], dim=-1)  # [B,T,A,5]
+        eps_gt = torch.cat([dt, dr, ds_exp], dim=-1)  
         eps_gt_norm = eps_gt.clone()
         eps_gt_norm[..., 0:2] = eps_gt_norm[..., 0:2] / self.pos_scale
         kp_norms = keypoints.norm(dim = -1)
         denom = (kp_norms * self.rad_scale).clamp_min(1)
         eps_gt_norm[..., 2:4] = eps_gt_norm[..., 2:4] / denom[None, None, :, None]
-        # eps_gt_norm[torch.isnan(eps_gt_norm)] = 0
 
-        # --- MSE -------------------------------------------------------------
+        # MSE 
         loss = self.mse(pred_eps, eps_gt_norm)
 
         return loss
@@ -477,10 +414,10 @@ class TrainConfig:
     # geometry encoder configs
     num_sampled_pc = 8
     num_chosen_pc = 256 # downsample original set of point clouds
-    train_geo_encoder = True
-    k_neighbours = 16
+    train_geo_encoder = False
+    k_neighbours = 8
     geo_num_samples = 5000
-    geo_num_epochs = 20
+    geo_num_epochs = 10
 
 if __name__ == "__main__":
     from agent import GeometryEncoder, fulltrain_geo_enc2d
@@ -517,7 +454,7 @@ if __name__ == "__main__":
         curvature=cfg.hyp_curvature,
         tau=cfg.tau
 
-    ).to(cfg.device)  # your policy encapsulates rho, PCA alignment, and dynamics
+    ).to(cfg.device)  
     if cfg.continue_training:
             agent_state_dict = torch.load('agent.pth', map_location="cpu")
             agent.load_state_dict(agent_state_dict['model'])

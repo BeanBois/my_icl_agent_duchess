@@ -89,7 +89,7 @@ class Policy(nn.Module):
         ### first build local hetero graph
         F_list, C_list = [], []
         for i in range(B*N*L):
-            # one cloud Pi: [M_raw, 2]  (use your raw per-frame points here)
+            # one cloud Pi: [M_raw, 2]  
             Pi = flat_demo_object_pos[i]           # [M_raw, 2]
             Fi, Ci = self.geometric_encoder(Pi)    # Fi: [M, D], Ci: [M, 2]
             F_list.append(Fi)
@@ -99,9 +99,7 @@ class Policy(nn.Module):
         flat_demo_local_graphs = build_local_heterodata_batch(
             agent_pos_b = flat_demo_agent_info,
             scene_pos_b=flat_demo_scene_pos_batch,
-            scene_feats_b=flat_demo_scene_feats_batch,
-            # num_freqs=self.euc_dim // 4,
-            include_agent_agent=False # no agent-agent edges 
+            scene_feats_b=flat_demo_scene_feats_batch
         ) # returns HeteroBatch[B*N*L]
 
         ### then get rho(demo)
@@ -121,9 +119,7 @@ class Policy(nn.Module):
         curr_local_graph_batch = build_local_heterodata_batch(
             agent_pos_b = curr_agent_info,      # [B, A, 6]
             scene_pos_b = curr_scene_pos,       # [B, M, 2]
-            scene_feats_b = curr_scene_feats,   # [B, M, D]
-            # num_freqs = self.euc_dim //4,
-            include_agent_agent=False
+            scene_feats_b = curr_scene_feats   # [B, M, D]
         )
         ### get rho(current)
         curr_node_emb, _ = self.rho(curr_local_graph_batch)
@@ -143,7 +139,7 @@ class Policy(nn.Module):
         flat_pred_agent_info = pred_agent_info.view(B*T, num_agent_nodes, -1)
         F_list, C_list = [], []
         for i in range(B*T):
-            # one cloud Pi: [M_raw, 2]  (use your raw per-frame points here)
+            # one cloud Pi: [M_raw, 2]  
             Pi = flat_pred_obs_info[i]           # [M_raw, 2]
             Fi, Ci = self.geometric_encoder(Pi)    # Fi: [M, D], Ci: [M, 2]
             F_list.append(Fi)
@@ -153,9 +149,7 @@ class Policy(nn.Module):
         flat_pred_local_graphs = build_local_heterodata_batch(
             agent_pos_b = flat_pred_agent_info,
             scene_pos_b = flat_pred_scene_pos_batch,
-            scene_feats_b = flat_pred_feats_batch,
-            # num_freqs=self.euc_dim // 4,
-            include_agent_agent=False 
+            scene_feats_b = flat_pred_feats_batch
         )
 
         ### get pred rho 
@@ -166,8 +160,7 @@ class Policy(nn.Module):
 
         # now we have curr_agent_pos [B, A, agent_dim], pred_agent_pos [B,T,A,agent_dim] and demo_agent_pos [B,N,L,A,agent_dim]
         # we build SK tree by concatinating curr_agent_pos | pred_agent_pos | deo_agent_pos along L dimension, eseentially treating
-        # curr_obs and pred_actions as starting states. This is motivated by the FINE-TO-COARSE IL, which has the idea of just repeating
-        # the demonstration after finding a point where the demonstration starts
+        # curr_obs and pred_actions as starting states.  
         _buffer = torch.zeros(B,N,1,num_agent_nodes,agent_dim)
         _curr_agent_info_temp = curr_agent_info.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
         _final_data = torch.concat([_buffer, _curr_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
@@ -193,9 +186,7 @@ class Policy(nn.Module):
         demo_rho_bt         = demo_rho_batch.repeat_interleave(T, dim=0)  # [B*T, N, L, A, de]
         demo_hyp_bt         = demo_hyp_all.repeat_interleave(T, dim=0)    # [B*T, N, L, dh]
 
-        # 6) Flattened pred Euclidean queries already exist in your code:
-        #    flat_pred_rho_batch: [B*T, A, de]
-
+        # 6) Flattened pred Euclidean queries 
         flat_pred_latent_variables = self.context_alignment(
             flat_pred_rho_batch,   # [B*T, A, de]
             flat_pred_hyp_emb,     # [B*T, N, dh]  <-- KEEP N here
@@ -204,10 +195,10 @@ class Policy(nn.Module):
         )  # -> [B*T, A, z_dim]
         pred_latent_variables = flat_pred_latent_variables.view(B, T, num_agent_nodes, -1) 
         ############################ info Z_current => Z_predicted  ############################ 
+        
         # like in IP 
         # Z_current <= curr_latent_var [B,A,z]
         # Z_predicted <= pred_latent_variables [B,T, A, z_dim] * T = self.pred_horizon
-        
         pred_embd = self.foresight_adjustment( 
             curr_latent_var, 
             pred_latent_variables,
@@ -234,44 +225,42 @@ class Policy(nn.Module):
         u_batch = expmap0(pooled_tan, self.curvature)                    # (B, Dh)
         return u_batch
 
+        
+    # Apply inverse SE(2) to OBJECTS ONLY (non-cumulative per t).
     def _perform_reverse_action(
         self,
         actions: torch.Tensor,         # [B, T, 4] -> (dx, dy, dtheta_rad, state_action)
         curr_object_pos: torch.Tensor, # [B, M, 2]
         curr_agent_info: torch.Tensor  # [B, A, 6]: [ax, ay, cos, sin, grip, state_gate?]
     ):
-        """
-        Apply inverse SE(2) to OBJECTS ONLY (non-cumulative per t).
-        Agents stay fixed in pose; per-step grip is set to the command if it differs from current.
-        """
+
         B, T, _ = actions.shape
         _, M, _ = curr_object_pos.shape
         _, A, C = curr_agent_info.shape
         device  = curr_object_pos.device
 
-        # ---- split action channels ----
-        dxdy   = actions[..., 0:2]            # [B,T,2]
-        dtheta = actions[..., 2]              # [B,T]
-        sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
+        # split action channels  
+        dxdy   = actions[..., 0:2]            
+        dtheta = actions[..., 2]              
+        sa     = actions[..., 3].clamp(0, 1)  
 
-        # ---- objects: inverse SE(2) per t, from the same base pose ----
-        # p_prev = R(dθ)^T @ (p_curr - [dx,dy])
-        dxdy_bt12 = dxdy.unsqueeze(2)                 # [B,T,1,2]
-        obj_b1m2  = curr_object_pos.unsqueeze(1)      # [B,1,M,2]
-        delta     = obj_b1m2 - dxdy_bt12              # [B,T,M,2]
+        #  objects: inverse SE(2) per t, from the same base pose  
+        dxdy_bt12 = dxdy.unsqueeze(2)                
+        obj_b1m2  = curr_object_pos.unsqueeze(1)     
+        delta     = obj_b1m2 - dxdy_bt12             
 
-        c = torch.cos(dtheta).unsqueeze(-1).unsqueeze(-1)   # [B,T,1,1]
+        c = torch.cos(dtheta).unsqueeze(-1).unsqueeze(-1)   
         s = torch.sin(dtheta).unsqueeze(-1).unsqueeze(-1)
 
-        x = delta[..., 0:1]                             # [B,T,M,1]
+        x = delta[..., 0:1]                            
         y = delta[..., 1:2]
-        # R(θ)^T application:
+        # R(theta)^T application:
         x_rot =  c * x + s * y
         y_rot = -s * x + c * y
-        pred_object_pos = torch.cat([x_rot, y_rot], dim=-1)  # [B,T,M,2]
+        pred_object_pos = torch.cat([x_rot, y_rot], dim=-1)  
 
-        # ---- agent: positions/orientations fixed across time ----
-        ax   = curr_agent_info[..., 0].unsqueeze(1).expand(B, T, A)  # [B,T,A]
+        # agent: positions/orientations fixed across time 
+        ax   = curr_agent_info[..., 0].unsqueeze(1).expand(B, T, A) 
         ay   = curr_agent_info[..., 1].unsqueeze(1).expand(B, T, A)
         cth  = curr_agent_info[..., 2].unsqueeze(1).expand(B, T, A)
         sth  = curr_agent_info[..., 3].unsqueeze(1).expand(B, T, A)
@@ -283,11 +272,11 @@ class Policy(nn.Module):
             gate = torch.ones(B, T, A, device=device, dtype=curr_agent_info.dtype)
 
         # Per-step grip output: set to command if different from current; otherwise keep current
-        sa_bta = sa.unsqueeze(-1).expand(B, T, A)             # [B,T,A]
-        change_mask = (sa_bta.round() != grip.round())        # bool
-        grip_out = torch.where(change_mask, sa_bta, grip)     # [B,T,A]
+        sa_bta = sa.unsqueeze(-1).expand(B, T, A)             
+        change_mask = (sa_bta.round() != grip.round())        
+        grip_out = torch.where(change_mask, sa_bta, grip)     
 
-        pred_agent_info = torch.stack([ax, ay, cth, sth, grip_out, gate], dim=-1)  # [B,T,A,6]
+        pred_agent_info = torch.stack([ax, ay, cth, sth, grip_out, gate], dim=-1) 
         return pred_object_pos, pred_agent_info
 
 
@@ -307,49 +296,49 @@ class Policy(nn.Module):
         device  = curr_object_pos.device
         dtype   = curr_object_pos.dtype
 
-        # ---- split action channels ----
-        dxdy   = actions[..., 0:2]            # [B,T,2]
-        dtheta = actions[..., 2]              # [B,T]
-        sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
+        #  split action channels 
+        dxdy   = actions[..., 0:2]             
+        dtheta = actions[..., 2]               
+        sa     = actions[..., 3].clamp(0, 1)   
 
-        # ---- Prepare outputs ----
+        #  Prepare outputs 
         pred_object_pos  = torch.empty(B, T, M, 2, device=device, dtype=dtype)
         pred_agent_info  = torch.empty(B, T, A, 6, device=device, dtype=curr_agent_info.dtype)
 
-        # ---- Static agent info (positions/orientations & optional gate) ----
-        ax   = curr_agent_info[..., 0]  # [B,A]
+        #  Static agent info (positions/orientations & optional gate) 
+        ax   = curr_agent_info[..., 0]   
         ay   = curr_agent_info[..., 1]
         cth  = curr_agent_info[..., 2]
         sth  = curr_agent_info[..., 3]
-        grip = curr_agent_info[..., 4]  # this will be updated sequentially
+        grip = curr_agent_info[..., 4]   
         if C >= 6:
             gate = curr_agent_info[..., 5]
         else:
             gate = torch.ones(B, A, device=device, dtype=curr_agent_info.dtype)
 
-        # ---- Sequential roll-back over time ----
+        #  Sequential roll-back over time 
         # Start from the current object positions and current grip, step T times
-        pos_t   = curr_object_pos  # [B,M,2]
-        grip_t  = grip             # [B,A]
+        pos_t   = curr_object_pos  
+        grip_t  = grip             
 
         for t in range(T):
-            # Objects: p_{t-1} = R(-dθ_t) @ (p_t - [dx_t, dy_t])
-            dxdy_bt12 = dxdy[:, t].unsqueeze(1)          # [B,1,2] -> broadcast over M
-            delta     = pos_t - dxdy_bt12                # [B,M,2]
+            # Objects: p_{t-1} = R(-dtheta_t) @ (p_t - [dx_t, dy_t])
+            dxdy_bt12 = dxdy[:, t].unsqueeze(1)         
+            delta     = pos_t - dxdy_bt12               
 
-            c = torch.cos(-dtheta[:, t]).view(B, 1, 1)   # [B,1,1]
+            c = torch.cos(-dtheta[:, t]).view(B, 1, 1)  
             s = torch.sin(-dtheta[:, t]).view(B, 1, 1)
 
-            x = delta[..., 0:1]                          # [B,M,1]
-            y = delta[..., 1:2]                          # [B,M,1]
+            x = delta[..., 0:1]                         
+            y = delta[..., 1:2]                         
             x_rot =  c * x + s * y
             y_rot = -s * x + c * y
-            pos_t = torch.cat([x_rot, y_rot], dim=-1)    # [B,M,2]
+            pos_t = torch.cat([x_rot, y_rot], dim=-1)   
 
             pred_object_pos[:, t] = pos_t
 
             # Agents: sequential grip update vs last state
-            sa_t = sa[:, t].unsqueeze(-1).expand(B, A)   # [B,A]
+            sa_t = sa[:, t].unsqueeze(-1).expand(B, A)   
             change_mask = (sa_t.round() != grip_t.round())
             grip_t = torch.where(change_mask, sa_t, grip_t)
 

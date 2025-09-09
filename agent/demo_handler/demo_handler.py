@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from utilities import expmap0, logmap0, exp_map_x, log_map_x
 
 
-
 # ---------- tree utilities ----------
 # clustering is done based on 2 conditions
     # if next proceeding agent_info state has changed, then the next_proceeding obs becomes new parent
@@ -41,8 +40,8 @@ def _cluster(
     return clusters
 
 def build_temporal_tree_multigran_K(
-    theta: torch.Tensor,            # [T]
-    state: torch.Tensor,            # [T]
+    theta: torch.Tensor,            
+    state: torch.Tensor,            
     grans: List[float],
     use_degrees: bool = True,
 ) -> Tuple[List[int], List[List[int]]]:
@@ -119,25 +118,20 @@ class HyperbolicTemporalMixer(nn.Module):
 
     def forward(self, x: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         d = depth.clamp(max=self.max_depth - 1)
-        v = logmap0(x, self.c)  # [L,2]
+        v = logmap0(x, self.c)  
         k = self.depth_scale(d).view(-1, 1)
         v = k * v
         ang = self.depth_theta(d).view(-1)
         cos_a, sin_a = torch.cos(ang), torch.sin(ang)
         R = torch.stack([torch.stack([cos_a, -sin_a], dim=-1),
-                         torch.stack([sin_a,  cos_a], dim=-1)], dim=-2)  # [L,2,2]
+                         torch.stack([sin_a,  cos_a], dim=-1)], dim=-2) 
         v = torch.einsum('lij,lj->li', R, v)
         return expmap0(v, self.c)
 
 
 def segment_softmax(scores: torch.Tensor, index: torch.Tensor, num_segments: Optional[int] = None) -> torch.Tensor:
-    """
-    Softmax over variable-length segments given by `index` (e.g., per target node i in edge list).
-    scores: [E], index: [E] with values in [0..V-1]
-    """
     if num_segments is None:
         num_segments = int(index.max().item()) + 1 if index.numel() > 0 else 0
-    # subtract per-segment max for stability
     max_buf = torch.full((num_segments,), -1e30, device=scores.device, dtype=scores.dtype)
     max_buf = max_buf.scatter_reduce(0, index, scores, reduce="amax", include_self=True)
     normed = scores - max_buf.gather(0, index)
@@ -148,11 +142,6 @@ def segment_softmax(scores: torch.Tensor, index: torch.Tensor, num_segments: Opt
 
 
 class HyperbolicTreeLayer(nn.Module):
-    """
-    For each edge i <- j:
-      v_ij = log_xi(x_j) in T_{x_i}; score -> α_ij (softmax per i); aggregate m_i = Σ α_ij v_ij;
-    depth-gate in T_{x_i}; update x_i' = exp_xi(η m_i).
-    """
     def __init__(self, curvature: float = 1.0, att_dim: int = 16, use_bias: bool = True):
         super().__init__()
         self.register_buffer("c", torch.tensor(float(curvature)))
@@ -163,25 +152,25 @@ class HyperbolicTreeLayer(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,            # [L,2]
-        edge_index: torch.Tensor,   # [2,E], row=i (target), col=j (source)
-        depth: torch.Tensor,        # [L]
+        x: torch.Tensor,           
+        edge_index: torch.Tensor,  
+        depth: torch.Tensor,       
         mixer: Optional[HyperbolicTemporalMixer] = None,
     ) -> torch.Tensor:
         assert x.dim() == 2 and x.size(-1) == 2
         assert edge_index.dim() == 2 and edge_index.size(0) == 2
         L = x.size(0)
-        row, col = edge_index[0], edge_index[1]    # i <- j
+        row, col = edge_index[0], edge_index[1]   
         xi = x[row]
         xj = x[col]
         c = self.c
 
-        # 1) log at xi (consistent with your exp0/log0)
-        v_ij = log_map_x(xi, xj, c)               # [E,2]
+        # 1) log at xi 
+        v_ij = log_map_x(xi, xj, c)               
 
         # 2) attention in T_{xi}
-        scores = self.scorer(v_ij).squeeze(-1)    # [E]
-        alpha = segment_softmax(scores, row, num_segments=L)  # [E]
+        scores = self.scorer(v_ij).squeeze(-1)    
+        alpha = segment_softmax(scores, row, num_segments=L)  
         v_ij = alpha.unsqueeze(-1) * v_ij
 
         # 3) aggregate per target i
@@ -194,7 +183,7 @@ class HyperbolicTreeLayer(nn.Module):
         ang = mixer.depth_theta(d).view(-1)
         ca, sa = torch.cos(ang), torch.sin(ang)
         R = torch.stack([torch.stack([ca, -sa], dim=-1),
-                            torch.stack([sa,  ca], dim=-1)], dim=-2)  # [L,2,2]
+                            torch.stack([sa,  ca], dim=-1)], dim=-2)  
         m_i = k * torch.einsum('lij,lj->li', R, m_i)
 
         # 5) manifold update at xi
@@ -203,7 +192,6 @@ class HyperbolicTreeLayer(nn.Module):
 
 def build_local_edge_index(parent: List[int], children: List[List[int]], L: int) -> torch.Tensor:
     """
-    Returns [2,E] with:
       - temporal edges (t-1 <-> t),
       - parent <-> child edges.
     """
@@ -222,14 +210,6 @@ def build_local_edge_index(parent: List[int], children: List[List[int]], L: int)
 
 
 class DemoHandler(nn.Module):
-    """
-    Input: demo_agent_info [B, N, L, A, 6]  (x,y,theta,state,time,done)
-    Output: embeddings [B, N, L, 2]
-    Pipeline:
-      1) Build temporal tree via multi-granularity clustering.
-      2) SK-style initial embedding in the Poincaré ball (2D).
-      3) Tree message passing (tangent at node) using local edges.
-    """
     def __init__(self,
                  curvature: float = 1.0,
                  angular_granularities_deg: List[float] = [90.0, 60.0, 30.0],
@@ -237,7 +217,7 @@ class DemoHandler(nn.Module):
                  min_edge_dist: float = 0.5,
                  att_dim: int = 16):
         super().__init__()
-        self.c = torch.tensor(float(curvature))  # as Tensor for sqrt
+        self.c = torch.tensor(float(curvature))  
         self.ang_grans = [math.radians(g) for g in angular_granularities_deg]
         self.sk = SKConstructor2D(curvature=float(curvature),
                                   base_cone_deg=base_cone_deg,
@@ -258,10 +238,6 @@ class DemoHandler(nn.Module):
         return depth
 
     def forward(self, demo_agent_info: torch.Tensor) -> torch.Tensor:
-        """
-        demo_agent_info: [B, N, L, A, 6]  -> returns [B, N, L, 2]
-        Uses agent index 0 as the proceeding agent for θ/state.
-        """
         B, N, L, A, D = demo_agent_info.shape
         device = demo_agent_info.device
         assert D >= 6, "last dim must contain at least (x,y,theta,state,time,done)"
@@ -273,22 +249,22 @@ class DemoHandler(nn.Module):
 
         for b in range(B):
             for n in range(N):
-                th_seq = theta[b, n]  # [L]
-                st_seq = state[b, n]  # [L]
+                th_seq = theta[b, n]   
+                st_seq = state[b, n]   
 
                 # 1) temporal tree
                 parent, children = build_temporal_tree_multigran_K(th_seq, st_seq, self.ang_grans)
-                depth = self._compute_depth(parent).to(device)  # [L]
+                depth = self._compute_depth(parent).to(device)   
 
                 # 2) SK initial embedding
-                emb = self.sk(children, parent, L).to(device)   # [L,2]
+                emb = self.sk(children, parent, L).to(device)    
 
                 # 3) local edges (temporal ±1 and parent↔child)
                 edge_index = build_local_edge_index(parent, children, L).to(device)
 
-                # 4) tangent-at-node message passing (with depth gating inside)
+                # # 4) tangent-at-node message passing (with depth gating inside)
                 emb = self.tree_layer(emb, edge_index, depth, mixer=self.mixer)
 
                 out[b, n] = emb
 
-        return out  # [B,N,L,2]
+        return out   
