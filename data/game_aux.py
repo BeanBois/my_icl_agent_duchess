@@ -112,18 +112,11 @@ class Player:
         return
 
     def move_with_action(self,action : Action):
-        # action is ROTATION @ TRANSLATION, SO A 2X2 matrix 
-        # we need to update self.x, self.y and self.angle respectively
-        
         movement_vector = action.as_vector(mode='deg')
-        # movement_vector = action.vector_for_pygame(mode='deg')
-
         state_change_action = movement_vector[2]
         angle = movement_vector[1]
-        # Update the object's angle (add the rotation to current angle)
         self.angle += angle
-        
-        # Optional: Keep angle in [0, 360) range
+        # Keep angle in [0, 360) range
         self.angle = self.angle % 360
 
         # Update position

@@ -64,7 +64,6 @@ class Agent(nn.Module):
             demo_object_pos, # [B x N x L x M x 2]
             noisy_actions # [B, T, 4]
         ) # [B, T, 4, 5]
-        # denoising_directions = self._unnormalise_denoising_directions(denoising_directions_normalised)
 
         return denoising_directions_normalised, noisy_actions
 
@@ -170,7 +169,6 @@ class Agent(nn.Module):
         dev, dt = actions.device, actions.dtype
 
         # --- schedules ---
-        # shape [K]; take gather with t_int to get shape [B,T]
         ab_all = self.alphas_cumprod.to(dev, dt)                # [K]
         ab_t   = ab_all.gather(0, t_int.reshape(-1)).reshape(B,T)  # [B,T]
         sqrt_ab_t  = ab_t.sqrt()                                 # [B,T]
@@ -302,91 +300,3 @@ class Agent(nn.Module):
         vec_cw = torch.stack([dx, dy, -th_ccw], dim=-1)
         return vec_cw
 
-    # def _actions_vect_to_SE2_flat(self, actions):
-    #     # (x,y,theta_rad,state) => SE(2).flatten() | state 
-    #     B, T, _ = actions.shape
-    #     device = actions.device 
-    #     dtype = actions.dtype 
-
-    #     dx = actions[..., 0]
-    #     dy = actions[..., 1]
-    #     th = actions[..., 2]
-    #     st = actions[..., 3]
-
-    #     c, s = torch.cos(th), torch.sin(th)
-    #     # T_clean: [B,T,3,3]
-    #     SE2 = torch.zeros(B, T, 3, 3, device=device, dtype=dtype)
-    #     SE2[..., 0, 0] = c
-    #     SE2[..., 0, 1] = -s
-    #     SE2[..., 1, 0] = s
-    #     SE2[..., 1, 1] = c
-    #     SE2[..., 0, 2] = dx
-    #     SE2[..., 1, 2] = dy
-    #     SE2[..., 2, 2] = 1.
-
-    #     SE2_flat = SE2.view(B,T,9)
-    #     SE2_flat_final = torch.concat([SE2_flat, st], dim = -1)
-    #     return SE2_flat_final
-
-    # def _se2_exp(self, xi: torch.Tensor):
-    #     # """
-    #     # xi: [...,3] -> (vx,vy,omega)  (body-frame twist)
-    #     # returns SE(2) matrix [...,3,3]
-    #     # """
-    #     # vx, vy, w = xi[...,0], xi[...,1], xi[...,2]
-    #     # eps = 1e-6
-    #     # sw, cw = torch.sin(w), torch.cos(w)
-    #     # w_safe  = torch.where(torch.abs(w) < eps, torch.ones_like(w), w)
-    #     # a = sw / w_safe
-    #     # b = (1. - cw) / w_safe
-
-    #     # # V @ v
-    #     # tx = a*vx - b*vy
-    #     # ty = b*vx + a*vy
-    #     # tx = torch.where(torch.abs(w) < eps, vx, tx)
-    #     # ty = torch.where(torch.abs(w) < eps, vy, ty)
-
-    #     # T = torch.zeros(*xi.shape[:-1], 3, 3, dtype=xi.dtype, device=xi.device)
-    #     # T[...,0,0] = cw;  T[...,0,1] = -sw; T[...,0,2] = tx
-    #     # T[...,1,0] = sw;  T[...,1,1] =  cw; T[...,1,2] = ty
-    #     # T[...,2,2] = 1.0
-    #     # return T
-    #     """
-    #     xi: [...,3] = (vx,vy,omega_CW)
-    #     returns vec: (dx,dy,theta_CW)
-    #     Implemented via CCW exp + conversion.
-    #     """
-    #     vx, vy, om_cw = xi[..., 0], xi[..., 1], xi[..., 2]
-    #     xi_ccw = torch.stack([vx, vy, -om_cw], dim=-1)
-    #     vec_ccw = se2_exp(xi_ccw)           # your existing utility (CCW)
-    #     dx, dy, th_ccw = vec_ccw[..., 0], vec_ccw[..., 1], vec_ccw[..., 2]
-    #     vec_cw = torch.stack([dx, dy, -th_ccw], dim=-1)
-    #     return vec_cw
-
-    # def _se2_from_vec(self, vec: torch.Tensor):
-    #     """
-    #     vec: [...,3] -> (dx,dy,theta) to matrix
-    #     """
-    #     dx, dy, th = vec[...,0], vec[...,1], vec[...,2]
-    #     c, s = torch.cos(th), torch.sin(th)
-    #     T = torch.zeros(*vec.shape[:-1], 3, 3, dtype=vec.dtype, device=vec.device)
-    #     T[...,0,0] = c;  T[...,0,1] = -s; T[...,0,2] = dx
-    #     T[...,1,0] = s;  T[...,1,1] =  c; T[...,1,2] = dy
-    #     T[...,2,2] = 1.0
-    #     return T
-
-    # def _se2_to_vec(self, T: torch.Tensor):
-    #     """
-    #     T: [...,3,3] -> (dx,dy,theta)
-    #     """
-    #     dx = T[...,0,2]
-    #     dy = T[...,1,2]
-    #     th = torch.atan2(T[...,1,0], T[...,0,0])
-    #     return torch.stack([dx,dy,th], dim=-1)
-
-    # def _se2_compose(self, A: torch.Tensor, B: torch.Tensor):
-    #     """matrix compose with batch broadcasting: A @ B"""
-    #     return A @ B
-
-    # def _betas_lookup(self, timesteps):
-    #     return self.betas[timesteps]

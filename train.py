@@ -12,10 +12,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 import numpy as np
 
-# ---------------------------
+
 # Data interface (stub)
-# Replace with your real dataset that returns tensors
-# ---------------------------
 @dataclass
 class Item:
     # Shapes must match your policy.forward signature
@@ -319,9 +317,8 @@ def collate_items(batch: List[Item]) -> Item:
     assert len(batch) == 1, "This stub returns batch-already tensors; adjust as needed."
     return batch[0]
 
-# ---------------------------
+
 # Losses
-# ---------------------------
 class PerNodeDenoisingMSELoss(nn.Module):
     """
     ------
@@ -440,9 +437,8 @@ class PerNodeDenoisingMSELoss(nn.Module):
         return loss
 
 
-# ---------------------------
+
 # Trainer
-# ---------------------------
 @dataclass
 class TrainConfig:
     device: str = "cpu"
@@ -571,7 +567,6 @@ if __name__ == "__main__":
                         demo_object_pos,
                         clean_actions
                     )
-
 
                     loss = pnn_loss(
                         clean_actions,

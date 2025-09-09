@@ -3,62 +3,9 @@ from typing import Tuple, List, Dict, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from utilities import expmap0, logmap0, exp_map_x, log_map_x
 
-# ---------- Hyperbolic utilities (Poincaré ball, curvature c > 0) ----------
-def artanh(x, eps=1e-15):
-    x = torch.clamp(x, -1 + eps, 1 - eps)
-    return 0.5 * (torch.log1p(x) - torch.log1p(-x))
 
-def poincare_exp0(v, c):
-    # exp^c_0(v) = tanh( sqrt(c)*||v|| ) / ( sqrt(c)*||v|| ) * v   (kept as in your code)
-    norm = torch.norm(v, dim=-1, keepdim=True).clamp_min(1e-9)
-    factor = torch.tanh(torch.sqrt(c) * norm) / (torch.sqrt(c) * norm)
-    return factor * v
-
-def poincare_log0(x, c):
-    # log^c_0(x) = (1/sqrt(c)) * artanh( sqrt(c)*||x|| ) * x / ||x||  (kept as in your code)
-    norm = torch.norm(x, dim=-1, keepdim=True).clamp_min(1e-9)
-    factor = artanh(torch.sqrt(c) * norm) / (torch.sqrt(c) * norm)
-    return factor * x
-
-def mobius_add(x, y, c):
-    x2 = (x * x).sum(-1, keepdim=True)
-    y2 = (y * y).sum(-1, keepdim=True)
-    xy = (x * y).sum(-1, keepdim=True)
-    num = (1 + 2 * c * xy + c * y2) * x + (1 - c * x2) * y
-    den = 1 + 2 * c * xy + (c**2) * x2 * y2
-    return num / den.clamp_min(1e-9)
-
-def poincare_dist(x, y, c, eps=1e-9):
-    # d_B^c(x,y) = (2/sqrt(c)) * artanh( sqrt(c) * ||(-x) ⊕_c y|| )
-    diff = mobius_add(-x, y, c)
-    norm = torch.norm(diff, dim=-1).clamp_min(eps)
-    return (2.0 / torch.sqrt(c)) * artanh(torch.sqrt(c) * norm)
-
-# ---------- helpers for general-point maps (CONSISTENT with YOUR exp0/log0) ----------
-def _lambda_x(x, c):
-    # λ_x^{(c)} = 2 / (1 - c||x||^2)
-    x2 = (x * x).sum(dim=-1, keepdim=True)
-    return 2.0 / (1.0 - c * x2).clamp_min(1e-15)
-
-def log_map_x(x, y, c):
-    """
-    log_x^c(y) computed via your log0:  log_x = (2/λ_x) * log_0( (-x) ⊕_c y )
-    This makes log_x reduce to your log0 when x==0 (since λ_0=2 => factor=1).
-    """
-    w = mobius_add(-x, y, c)                              # move basepoint to origin
-    v0 = poincare_log0(w, c)                              # your log0
-    lam = _lambda_x(x, c)                                 # [*,1]
-    return (2.0 / lam) * v0
-
-def exp_map_x(x, v, c):
-    """
-    exp_x^c(v) computed via your exp0:  exp_x(v) = x ⊕_c exp_0( (λ_x/2) v )
-    This makes exp_x reduce to your exp0 when x==0 (since λ_0/2=1).
-    """
-    lam = _lambda_x(x, c)
-    step = (lam * 0.5) * v
-    return mobius_add(x, poincare_exp0(step, c), c)
 
 # ---------- tree utilities ----------
 # clustering is done based on 2 conditions
@@ -132,7 +79,7 @@ def build_temporal_tree_multigran_K(
         return parent, children
     return parent, children
 
-# ---------- SK-style hyperbolic constructor in 2D ----------
+
 class SKConstructor2D(nn.Module):
     def __init__(self, curvature: float = 1.0, base_cone_deg: float = 30.0, min_edge_dist: float = 0.5):
         super().__init__()
@@ -156,7 +103,7 @@ class SKConstructor2D(nn.Module):
                 node_radius[kid] = node_radius[p] + self.min_edge_dist
         e_x = torch.stack([torch.cos(node_angle), torch.sin(node_angle)], dim=-1)
         v = e_x * node_radius.unsqueeze(-1)
-        emb = poincare_exp0(v, self.c)
+        emb = expmap0(v, self.c)
         return emb  # [L,2]
 
 # ---------- Inter-/Intra-level hyperbolic mixer ----------
@@ -172,7 +119,7 @@ class HyperbolicTemporalMixer(nn.Module):
 
     def forward(self, x: torch.Tensor, depth: torch.Tensor) -> torch.Tensor:
         d = depth.clamp(max=self.max_depth - 1)
-        v = poincare_log0(x, self.c)  # [L,2]
+        v = logmap0(x, self.c)  # [L,2]
         k = self.depth_scale(d).view(-1, 1)
         v = k * v
         ang = self.depth_theta(d).view(-1)
@@ -180,9 +127,9 @@ class HyperbolicTemporalMixer(nn.Module):
         R = torch.stack([torch.stack([cos_a, -sin_a], dim=-1),
                          torch.stack([sin_a,  cos_a], dim=-1)], dim=-2)  # [L,2,2]
         v = torch.einsum('lij,lj->li', R, v)
-        return poincare_exp0(v, self.c)
+        return expmap0(v, self.c)
 
-# ---------- segment-softmax (no external deps) ----------
+
 def segment_softmax(scores: torch.Tensor, index: torch.Tensor, num_segments: Optional[int] = None) -> torch.Tensor:
     """
     Softmax over variable-length segments given by `index` (e.g., per target node i in edge list).
@@ -199,12 +146,12 @@ def segment_softmax(scores: torch.Tensor, index: torch.Tensor, num_segments: Opt
     denom = denom.scatter_reduce(0, index, exp, reduce='sum')
     return exp / denom.gather(0, index).clamp_min(1e-15)
 
-# ---------- Option A: Tangent-at-node hyperbolic message passing ----------
+
 class HyperbolicTreeLayer(nn.Module):
     """
     For each edge i <- j:
       v_ij = log_xi(x_j) in T_{x_i}; score -> α_ij (softmax per i); aggregate m_i = Σ α_ij v_ij;
-      optional depth-gate (your mixer params) in T_{x_i}; update x_i' = exp_xi(η m_i).
+    depth-gate in T_{x_i}; update x_i' = exp_xi(η m_i).
     """
     def __init__(self, curvature: float = 1.0, att_dim: int = 16, use_bias: bool = True):
         super().__init__()
@@ -241,24 +188,22 @@ class HyperbolicTreeLayer(nn.Module):
         m_i = torch.zeros(L, 2, device=x.device, dtype=x.dtype)
         m_i.index_add_(0, row, v_ij)
 
-        # 4) optional depth-gate (reuse your mixer params in tangent)
-        if mixer is not None:
-            d = depth.clamp(max=mixer.max_depth - 1)
-            k = mixer.depth_scale(d).view(-1, 1)
-            ang = mixer.depth_theta(d).view(-1)
-            ca, sa = torch.cos(ang), torch.sin(ang)
-            R = torch.stack([torch.stack([ca, -sa], dim=-1),
-                             torch.stack([sa,  ca], dim=-1)], dim=-2)  # [L,2,2]
-            m_i = k * torch.einsum('lij,lj->li', R, m_i)
+        # 4) depth-gate
+        d = depth.clamp(max=mixer.max_depth - 1)
+        k = mixer.depth_scale(d).view(-1, 1)
+        ang = mixer.depth_theta(d).view(-1)
+        ca, sa = torch.cos(ang), torch.sin(ang)
+        R = torch.stack([torch.stack([ca, -sa], dim=-1),
+                            torch.stack([sa,  ca], dim=-1)], dim=-2)  # [L,2,2]
+        m_i = k * torch.einsum('lij,lj->li', R, m_i)
 
         # 5) manifold update at xi
         x_new = exp_map_x(x, self.eta * m_i, c)
         return x_new
 
-# ---------- edge builder for local neighbourhood ----------
 def build_local_edge_index(parent: List[int], children: List[List[int]], L: int) -> torch.Tensor:
     """
-    Returns [2,E] with ONLY:
+    Returns [2,E] with:
       - temporal edges (t-1 <-> t),
       - parent <-> child edges.
     """
@@ -275,7 +220,7 @@ def build_local_edge_index(parent: List[int], children: List[List[int]], L: int)
     ei = torch.tensor(edges, dtype=torch.long).t().contiguous()
     return ei
 
-# ---------- Full demo handler ----------
+
 class DemoHandler(nn.Module):
     """
     Input: demo_agent_info [B, N, L, A, 6]  (x,y,theta,state,time,done)
@@ -283,8 +228,7 @@ class DemoHandler(nn.Module):
     Pipeline:
       1) Build temporal tree via multi-granularity clustering.
       2) SK-style initial embedding in the Poincaré ball (2D).
-      3) Option-A tree message passing (tangent at node) using ONLY local edges.
-      4) Depth-gated mixer (your original) for per-level rotate+scale.
+      3) Tree message passing (tangent at node) using local edges.
     """
     def __init__(self,
                  curvature: float = 1.0,
@@ -342,11 +286,8 @@ class DemoHandler(nn.Module):
                 # 3) local edges (temporal ±1 and parent↔child)
                 edge_index = build_local_edge_index(parent, children, L).to(device)
 
-                # 4) Option-A tangent-at-node message passing (with depth gating inside)
+                # 4) tangent-at-node message passing (with depth gating inside)
                 emb = self.tree_layer(emb, edge_index, depth, mixer=self.mixer)
-
-                # 5) (optional) extra global gate — if you still want it, uncomment:
-                # emb = self.mixer(emb, depth)
 
                 out[b, n] = emb
 

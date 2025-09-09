@@ -1,5 +1,3 @@
-
-# unused for now 
 from __future__ import annotations
 import math
 from typing import Tuple
@@ -27,9 +25,6 @@ class Geo2DEncoder(nn.Module):
       - kNN/radius neighborhood per centroid
       - Per-point descriptors: Δx, r, (sinθ,cosθ), 2D Fourier features on Δx
       - Small MLP -> (max, mean) pool -> stats -> feature head
-
-    This matches the paper’s “encode dense point cloud to {F^i, p^i}” idea, but in 2D. 
-    Keep M=16 by default like the paper. (Appendix A). 
     """
     def __init__(
         self,
@@ -119,8 +114,7 @@ class Geo2DEncoder(nn.Module):
 # Public wrapper
 class GeometryEncoder(nn.Module):
     """
-    Public API used by Instant Policy code.
-    Swap 'use_pointnet' to True to revert to the (UNUSED) PointNet++ encoder below.
+    Public API for policy
     """
     def __init__(
         self,
@@ -170,10 +164,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Training data
 class PointCloud2DDataset(Dataset):
-    """
-    Expects a list/iterable of 2D point clouds (Nx2) in any scale.
-    You can wrap your pseudogame frames here.
-    """
+
     def __init__(self, clouds):
         self.clouds = []
         for P in clouds:
@@ -206,23 +197,7 @@ def collate_clouds(batch):
     # batch is a list of [N_i, 2] tensors; we keep variable sizes
     return batch
 
-# Rasterisation utilities
-@torch.no_grad()
-def _fps_2d(P, M):
-    # Simple FPS (like in your encoder)
-    N = P.shape[0]
-    M = min(M, N)
-    idx = torch.zeros(M, dtype=torch.long, device=P.device)
-    # random start
-    idx[0] = torch.randint(0, N, (1,), device=P.device)
-    dist = torch.full((N,), float("inf"), device=P.device)
-    last = P[idx[0]]
-    for i in range(1, M):
-        d = torch.sum((P - last)**2, dim=-1)
-        dist = torch.minimum(dist, d)
-        idx[i] = torch.argmax(dist)
-        last = P[idx[i]]
-    return idx
+
 
 @torch.no_grad()
 def _knn(P, q, k):
@@ -256,9 +231,8 @@ def rasterize_patch(P, center, k=K_NEIGHBORS, H=PATCH_H, W=PATCH_W, pad=1.1):
     grid[ys, xs] = 1.0
     return grid  # [H,W]
 
-# -----------------------
+
 # Training step
-# -----------------------
 def train_epoch(encoder, decoder, loader, optim):
     encoder.train(); decoder.train()
     total_loss = 0.0
@@ -303,13 +277,11 @@ def train_epoch(encoder, decoder, loader, optim):
 
     return total_loss / max(1, len(loader))
 
-# -----------------------
+
 # data aux 
-# -----------------------
 def get_pseudogame_clouds(num_clouds = 10):
     from data import PseudoGame as PseudoDemo
     clouds = []
-    # Pseudocode; adapt to your API
     for _ in range(num_clouds):
         pseudo_demo = PseudoDemo()
         obs = pseudo_demo.get_obs()
@@ -317,15 +289,11 @@ def get_pseudogame_clouds(num_clouds = 10):
         clouds.append(pc)
     return clouds
 
-# -----------------------
-# Training func
-# -----------------------
+
+# Training func 
 def fulltrain_geo_enc2d(get_clouds_fn = get_pseudogame_clouds, num_samples = 1000, num_epochs = EPOCHS ,batch_size = BATCH_CLOUDS, num_sampled_pc = M_NODES, k_neighbours = K_NEIGHBORS, 
                         save_path = SAVE_PATH, fourier_L = FOURIER_L, feat_dim = FEAT_DIM, h = PATCH_H, w = PATCH_W, lr = LR, weight_decay = WEIGHT_DECAY):
-    """
-    `get_clouds_fn` should return a list/iterable of arrays/torch tensors shaped [N,2].
-    Example below shows a dummy generator. Replace with your pseudogame export.
-    """
+
     clouds = get_clouds_fn(num_samples)
     ds = PointCloud2DDataset(clouds)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True, collate_fn=collate_clouds, drop_last=True)

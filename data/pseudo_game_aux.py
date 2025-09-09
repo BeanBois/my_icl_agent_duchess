@@ -111,18 +111,13 @@ class PseudoPlayer:
             pass
     
     def move_with_action(self,action : Action):
-        # action is ROTATION @ TRANSLATION, SO A 2X2 matrix 
-        # we need to update self.x, self.y and self.angle respectively
-        
         movement_vector = action.as_vector(mode='deg')
         state_change_action = movement_vector[2]
         angle = movement_vector[1]
-        # Update the object's angle (add the rotation to current angle)
-        self.angle += angle
-        
-        # Optional: Keep angle in [0, 360) range
-        self.angle = self.angle % 360
 
+        self.angle += angle
+        # Keep angle in [0, 360) range
+        self.angle = self.angle % 360
 
         # Update position
         theta_angle = np.deg2rad(self.angle)
@@ -371,13 +366,4 @@ class PseudoGoal:
             }
 AVAILABLE_OBJECTS = [PseudoEdibleObject, PseudoObstacle, PseudoGoal]
 
-# class GameObjective(Enum):
-#     EAT_ALL = 1
-#     REACH_GOAL = 2
-
-
-# # NEED TO INCORPORATE GAMEINTERFACE SUCH THAT IT CAN TAKE IN DEMO AND AGENT MOVES 
-# class GameMode(Enum):
-#     DEMO_MODE = 1
-#     AGENT_MODE = 2 
 

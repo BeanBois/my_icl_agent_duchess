@@ -6,12 +6,11 @@ from utilities import *
 
 # aux
 from .demo_handler import DemoHandler
-from .my_local_graph import build_local_heterodata_batch
+from .graphs import build_local_heterodata_batch
 from .rho import Rho 
 from .foresight import IntraActionSelfAttn, PsiForesight
 from .pma import ProductManifoldAttention
 from .action_head import SimpleActionHead
-from .alignment import EuclidToHypAlign
 
 class Policy(nn.Module):
 
@@ -171,14 +170,10 @@ class Policy(nn.Module):
         # the demonstration after finding a point where the demonstration starts
         _buffer = torch.zeros(B,N,1,num_agent_nodes,agent_dim)
         _curr_agent_info_temp = curr_agent_info.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
-        # _pred_agent_info_temp = pred_agent_info.view(B,1,T,num_agent_nodes,agent_dim).repeat(1,N,1,1,1)
-        # _final_data = torch.concat([_buffer, _curr_agent_info_temp, _pred_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
         _final_data = torch.concat([_buffer, _curr_agent_info_temp, demo_agent_info], dim = 2) #(B,N,L+T+2,A,6)
         hyperbolic_embeddings = self.demo_handler(_final_data)[:,:,1:,:] # [B,N,L+T+2,dh]
 
         curr_hyp_emb = hyperbolic_embeddings[:,:,0,:].view(B,N,-1) # choose form first demo they will be the same 
-        # pred_hyp_emb = hyperbolic_embeddings[:,0,1:self.pred_horizon+1,:].view(B,T, -1) # choose form first demo they will be the same smentically
-        # demo_hyp_all = hyperbolic_embeddings[:,:,self.pred_horizon+1:,:].view(B,N,L,-1)
         pred_hyp_emb = curr_hyp_emb.clone().view(B,1,-1).repeat(1,self.pred_horizon,1) # choose form first demo they will be the same smentically
         demo_hyp_all = hyperbolic_embeddings[:,:,1:,:].view(B,N,L,-1)
 
@@ -259,7 +254,7 @@ class Policy(nn.Module):
         dtheta = actions[..., 2]              # [B,T]
         sa     = actions[..., 3].clamp(0, 1)  # [B,T] desired gripper/state command (0/1)
 
-        # ---- OBJECTS: inverse SE(2) per t, from the SAME base pose ----
+        # ---- objects: inverse SE(2) per t, from the same base pose ----
         # p_prev = R(dθ)^T @ (p_curr - [dx,dy])
         dxdy_bt12 = dxdy.unsqueeze(2)                 # [B,T,1,2]
         obj_b1m2  = curr_object_pos.unsqueeze(1)      # [B,1,M,2]
@@ -275,7 +270,7 @@ class Policy(nn.Module):
         y_rot = -s * x + c * y
         pred_object_pos = torch.cat([x_rot, y_rot], dim=-1)  # [B,T,M,2]
 
-        # ---- AGENTS: positions/orientations fixed across time ----
+        # ---- agent: positions/orientations fixed across time ----
         ax   = curr_agent_info[..., 0].unsqueeze(1).expand(B, T, A)  # [B,T,A]
         ay   = curr_agent_info[..., 1].unsqueeze(1).expand(B, T, A)
         cth  = curr_agent_info[..., 2].unsqueeze(1).expand(B, T, A)
@@ -367,15 +362,3 @@ class Policy(nn.Module):
             pred_agent_info[:, t, :, 5] = gate
 
         return pred_object_pos, pred_agent_info
-
-"""
-   _temp = curr_object_pos.view(B,1,1,num_agent_nodes, agent_dim).repeat(1,N,1,1,1)
-
-        _data = torch.concat([_temp, demo_agent_info], dim=2) # concat along L dimension
-
-        hyperbolic_embeddings = self.demo_handler(_data) # (B, N, L ,dh)
-        curr_hyp_emb = hyperbolic_embeddings[:, :, 0,:]
-        demo_hyp_all = hyperbolic_embeddings[:,:,1:,:]
-        B_, N_, L_, dh = demo_hyp_all.shape
-        assert (B_, N_, L_,) == (B, N, L), "SK shape mismatch."
-"""

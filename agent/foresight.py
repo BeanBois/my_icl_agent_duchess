@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --- small Fourier encoder for relative (dx,dy,theta) edges ---
+# --- small Fourier encoder for relative (dx,dy,theta) edges (batched) ---
 class FourierEdgeEmbed(nn.Module):
     def __init__(self, num_freqs: int = 6, out_dim: int = 64):
         super().__init__()
@@ -32,7 +32,7 @@ class FourierEdgeEmbed(nn.Module):
 class PsiForesight(nn.Module):
     """
     Edge-aware cross-attn from Z_current (keys/values) --> Z_pred (queries),
-    with edge features derived from (dx,dy,theta) like IP's key+edge formulation (Eq.3). :contentReference[oaicite:1]{index=1}
+    with edge features derived from (dx,dy,theta) 
     """
     def __init__(self, z_dim: int, edge_dim: int = 64, n_heads: int = 8, ff_mult: int = 4, dropout: float = 0.0):
         super().__init__()
@@ -97,13 +97,8 @@ class PsiForesight(nn.Module):
         k = self.k_proj(zc)                  # [B,T,A,z]
         v = self.v_proj(zc)                  # [B,T,A,z]
 
-        # Edge encoding from (dx,dy,theta) # fix from here?
-        # e = self.edge_enc(actions[..., :3]).unsqueeze(2).expand(B, T, A, A, -1)  # broadcast per (i <- j); simple A-to-A same edge
-        # # We only have a single relative per-time-step transform from "current->action".
-        # # For per-agent edges, we share the same edge code across j (keeps compute light).
-        # # Fold edge into K (Eq.3 style). :contentReference[oaicite:3]{index=3}
-        # e_k = self.e_proj(actions[..., :3].new_zeros(B, T, A, self.z))  # placeholder
-        # Simpler: add the same edge bias to every K_j at that t
+
+        # add the same edge bias to every K_j at that t
         e_bias = self.e_proj(self.edge_enc(actions[..., :3]))  # [B,T,edge_z]
         e_bias = e_bias.unsqueeze(2).expand(B, T, A, self.z)   # [B,T,A,z]
         k = k + e_bias
@@ -118,8 +113,7 @@ class PsiForesight(nn.Module):
         logits = torch.einsum('btaih,btajh->btahij',
                               qh.reshape(B,T,A,self.h,self.hd),
                               kh.reshape(B,T,A,self.h,self.hd)) / math.sqrt(self.hd)
-        # We want [B,T,h,A_i,A_j]; einsum above produced [B,T,h,A_i,A_j] already with dims ordering
-        # (If your PyTorch version complains, you can do: (qh * kh).sum(-1) with broadcasting.)
+
 
         attn = self._safe_softmax(logits, dim=-1)  # softmax over j
 
@@ -149,7 +143,7 @@ class PsiForesight(nn.Module):
 
 class IntraActionSelfAttn(nn.Module):
     """
-    Self-attention over the A action/predicted nodes *within each time step*.
+    Self-attention over the A action/predicted nodes within each time step*.
     Input/output: [B, T, A, z]
     """
     def __init__(self, z_dim: int, n_heads: int = 8, ff_mult: int = 4, dropout: float = 0.0):

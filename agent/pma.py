@@ -1,84 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# ========= Poincaré ball utilities (curvature c > 0) =========
+from utilities import log_map_x, exp_map_x, poincare_distance_sq
 
-def _safe_norm(x, dim=-1, keepdim=False, eps=1e-15):
-    return torch.clamp(torch.norm(x, dim=dim, keepdim=keepdim), min=eps)
-
-def _project_to_ball(x, c, eps=1e-5):
-    # Ensure ||x|| < 1/sqrt(c)
-    sqrt_c = c ** 0.5
-    norm = _safe_norm(x, dim=-1, keepdim=True)
-    max_norm = (1. - eps) / sqrt_c
-    scale = torch.where(norm > max_norm, max_norm / norm, torch.ones_like(norm))
-    return x * scale
-
-def lambda_x(x, c):
-    # Conformal factor λ_x^c = 2 / (1 - c ||x||^2)
-    x = _project_to_ball(x, c)
-    x2 = (x * x).sum(dim=-1, keepdim=True)
-    return 2.0 / (1.0 - c * x2).clamp_min(1e-15)
-
-def mobius_add(x, y, c):
-    """
-    Möbius addition on the Poincaré ball (Ganea et al. 2018).
-    """
-    x = _project_to_ball(x, c)
-    y = _project_to_ball(y, c)
-    x2 = (x * x).sum(dim=-1, keepdim=True)
-    y2 = (y * y).sum(dim=-1, keepdim=True)
-    xy = (x * y).sum(dim=-1, keepdim=True)
-    num = (1 + 2 * c * xy + c * y2) * x + (1 - c * x2) * y
-    den = 1 + 2 * c * xy + (c ** 2) * x2 * y2
-    return num / den.clamp_min(1e-15)
-
-def poincare_distance_sq(x, y, c):
-    """
-    d_c(x,y)^2 = ((2/√c) atanh( √c ||(-x) ⊕ y|| ))^2
-    """
-    sqrt_c = c ** 0.5
-    x = _project_to_ball(x, c)
-    y = _project_to_ball(y, c)
-    diff = mobius_add(-x, y, c)               # (-x) ⊕ y
-    norm = _safe_norm(diff, dim=-1)
-    arg = torch.clamp(sqrt_c * norm, max=1 - 1e-7)
-    dist = (2.0 / sqrt_c) * torch.atanh(arg)
-    return dist * dist
-
-def log_map_x(x, y, c):
-    """
-    log_x(y) on the Poincaré ball.
-    log_x(y) = (2 / (λ_x sqrt(c))) * atanh( sqrt(c) ||(-x) ⊕ y|| ) * u / ||u||
-               where u = (-x) ⊕ y
-    """
-    sqrt_c = c ** 0.5
-    lam = lambda_x(x, c)                      # [*, 1]
-    u = mobius_add(-x, y, c)
-    unorm = _safe_norm(u, dim=-1, keepdim=True)
-    # avoid 0 direction
-    u_dir = u / unorm
-    arg = torch.clamp(sqrt_c * unorm, max=1 - 1e-7)
-    scale = (2.0 / (lam * sqrt_c)) * torch.atanh(arg)  # [*,1]
-    return scale * u_dir
-
-def exp_map_x(x, v, c):
-    """
-    exp_x(v) on the Poincaré ball.
-    exp_x(v) = x ⊕ ( tanh( (λ_x sqrt(c)/2) ||v|| ) * v / (sqrt(c) ||v||) )
-    """
-    sqrt_c = c ** 0.5
-    lam = lambda_x(x, c)
-    vnorm = _safe_norm(v, dim=-1, keepdim=True)
-    # direction
-    v_dir = v / vnorm
-    # scale
-    factor = torch.tanh((lam * sqrt_c * vnorm) / 2.0) / (sqrt_c)
-    y = v_dir * factor
-    out = mobius_add(x, y, c)
-    return _project_to_ball(out, c)
-
-# ========= Product-manifold attention layer =========
 
 class ProductManifoldAttention(nn.Module):
     """
@@ -140,7 +64,6 @@ class ProductManifoldAttention(nn.Module):
         demo_hyp_flat = demo_hyp_emb.reshape(B, M, -1)  # dh
         return demo_rho_flat, demo_hyp_flat  # [B,M,A,de], [B,M,dh]
 
-
     def _ensure_demo_roots(self, curr_hyp_emb, N):
         """
         Accepts curr_hyp_emb as [B, dh] or [B, N, dh].
@@ -169,7 +92,6 @@ class ProductManifoldAttention(nn.Module):
                 break
         return mu.squeeze(2)  # [B,A,dh]
 
-
     def forward(self,
                 curr_rho_batch: torch.Tensor,  # [B, A, de]
                 curr_hyp_emb: torch.Tensor,    # [B, N, dh]  (or [B, dh] -> broadcast)
@@ -184,7 +106,6 @@ class ProductManifoldAttention(nn.Module):
         _, N2, L2, dh = demo_hyp_emb.shape
         assert N2 == N and L2 == L, "demo_hyp_emb shape mismatch"
 
-        # ---- NEW: ensure per-demo roots [B,N,dh] ----
         roots = self._ensure_demo_roots(curr_hyp_emb, N)  # [B,N,dh]
 
         # ---------- Product-metric attention scores (per demo) ----------
@@ -240,9 +161,6 @@ class ProductManifoldAttention(nn.Module):
 
         # Hyperbolic fuse: Karcher mean across {h_out_n}_n using gamma
         # Do a weighted Karcher mean by repeating points proportionally to gamma in tangent.
-        # Practical & differentiable: take μ0 as Karcher mean (unweighted), then do one
-        # weighted update step in tangent using gamma expectation.
-        # For stability we do a few unweighted iterations then one weighted step.
 
         # Unweighted initial mean over demos:
         mu0 = self._karcher_mean_points(h_out_n, self.c, iters=3)          # [B,A,dh]
@@ -259,39 +177,3 @@ class ProductManifoldAttention(nn.Module):
         z = torch.cat([z_e, z_h], dim=-1)                                  # [B,A,z_dim]
         z = self.drop(self.norm(z))
         return z
-        
-        # scores: s = -(λ_H d_H^2 + λ_E ||.||^2) / τ
-        # scores = -(self.lh * dH2 + self.le * e_diff_sq) / max(self.tau, 1e-8)  # [B, A, M]
-
-        # # ---------- Attention weights ----------
-        # alpha = torch.softmax(scores, dim=-1)  # [B, A, M]
-
-        # # ---------- Euclidean aggregation (weighted mean) ----------
-        # # demo_rho_flat: [B, M, A, de] → [B, A, M, de]
-        # demo_e_for_agg = demo_rho_flat.permute(0, 2, 1, 3).contiguous()
-        # e_out = torch.sum(alpha.unsqueeze(-1) * demo_e_for_agg, dim=2)  # [B, A, de]
-
-        # # ---------- Hyperbolic aggregation (Karcher mean via log/exp at curr_h) ----------
-        # # log_{x}(y_m): x = curr_hyp_emb; y_m = demo_hyp_flat
-        # # Produce logs for each (B, M, dh), then weight per agent with alpha[B,A,M].
-        # x = curr_hyp_emb  # [B, dh]
-        # y = demo_hyp_flat # [B, M, dh]
-        # # Compute log vectors once (no A), then combine with per-agent alpha
-        # log_vecs = log_map_x(
-        #     x.unsqueeze(1).expand(B, M, dh),  # [B,M,dh]
-        #     y,                                # [B,M,dh]
-        #     self.c
-        # )  # [B, M, dh]
-        # # Weight per-agent: alpha [B,A,M] -> [B,A,M,1]
-        # v = torch.sum(alpha.unsqueeze(-1) * log_vecs.unsqueeze(1), dim=2)  # [B, A, dh]
-        # # Exp back at x (per agent): base x is same across A; broadcast to [B,A,dh]
-        # x_ba = x.unsqueeze(1).expand(B, A, dh)
-        # h_out = exp_map_x(x_ba, v, self.c)  # [B, A, dh]
-
-        # # ---------- Project factors and combine ----------
-        # z_e = self.proj_e(e_out)            # [B, A, z_e]
-        # z_h = self.proj_h(h_out)            # [B, A, z_h]
-        # z = torch.cat([z_e, z_h], dim=-1)   # [B, A, z_dim]
-
-        # z = self.drop(self.norm(z))         # optional LN/Dropout
-        # return z

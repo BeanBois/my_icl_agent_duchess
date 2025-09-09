@@ -1,4 +1,3 @@
-# should store Game Code only
 from .game_aux import * 
 import random
 import json

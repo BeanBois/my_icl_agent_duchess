@@ -125,6 +125,19 @@ def poincare_dist(x, y, c, eps=1e-6):
     d = torch.log(z + torch.sqrt(torch.clamp(z*z - 1, min=0.0))) / _sqrt_c(c)
     return d.squeeze(-1)
 
+def poincare_distance_sq(x, y, c):
+    """
+    d_c(x,y)^2 = ((2/√c) atanh( √c ||(-x) ⊕ y|| ))^2
+    """
+    sqrt_c = c ** 0.5
+    x = proj_ball(x, c)
+    y = proj_ball(y, c)
+    diff = mobius_add(-x, y, c)               # (-x) ⊕ y
+    norm = _safe_norm(diff, dim=-1)
+    arg = torch.clamp(sqrt_c * norm, max=1 - 1e-7)
+    dist = (2.0 / sqrt_c) * torch.atanh(arg)
+    return dist * dist
+
 def proj_ball(x, c, eps=1e-5):
     # project to open ball radius 1/√c
     max_norm = (1.0 / (c**0.5)) - eps
@@ -132,12 +145,33 @@ def proj_ball(x, c, eps=1e-5):
     scale = (max_norm / n).clamp(max=1.0)
     return x * scale
 
+def log_map_x(x, y, c):
+    """
+    log_x^c(y) computed via log0:  log_x = (2/λ_x) * log_0( (-x) ⊕_c y )
+    """
+    w = mobius_add(-x, y, c)                              
+    v0 = logmap0(w, c)                              
+    lam = lambda_x(x, c)                                 
+    return (2.0 / lam) * v0
+
+def exp_map_x(x, v, c):
+    """
+    exp_x^c(v) computed via exp0:  exp_x(v) = x ⊕_c exp_0( (λ_x/2) v )
+    """
+    lam = lambda_x(x, c)
+    step = (lam * 0.5) * v
+    return mobius_add(x, expmap0(step, c), c)
+
+def lambda_x(x, c):
+    # λ_x^{(c)} = 2 / (1 - c||x||^2)
+    x2 = (x * x).sum(dim=-1, keepdim=True)
+    return 2.0 / (1.0 - c * x2).clamp_min(1e-15)
+
 def _safe_norm(x, eps=1e-15):
     return x.norm(dim=-1, keepdim=True).clamp_min(eps)
 
 def _sqrt_c(c):
     return c ** 0.5
-
 
 # Geometric Encoder Aux 
 def furthest_point_sampling_2d(P: torch.Tensor, M: int) -> torch.Tensor:

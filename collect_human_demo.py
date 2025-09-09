@@ -240,10 +240,6 @@ def load_and_inspect_demo(demoset_id, demo_id):
         demo = load_demo(filepath)
         print(f"Loaded demo: {len(demo)} observations")
         
-        # if demo:
-        #     print("Sample observation keys:", list(demo[0].keys()))
-        #     print("First observation:", demo[0])
-        
         return demo
         
     except Exception as e:

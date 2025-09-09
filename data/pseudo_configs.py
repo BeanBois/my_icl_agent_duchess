@@ -1,10 +1,5 @@
 from .game_configs import PLAYER_SIZE, PLAYER_SPEED, PLAYER_ROTATION_SPEED
 
-# class PseudoGameMode(Enum):
-#     EAT_EDIBLE = 1
-#     AVOID_OBSTACLE = 2
-#     REACH_GOAL = 3
-#     RANDOM = 4 
 
 NUM_OF_OBJECTS = 2
 MAX_NUM_SAMPLED_WAYPOINTS = 6 

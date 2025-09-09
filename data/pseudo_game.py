@@ -85,7 +85,6 @@ def build_interpolated_plan(waypoints: np.ndarray, step_px: float):
     plan = np.column_stack([path_xy, state_line])
     return plan.astype(np.int32)
 
-
 def signed_heading_error_deg(theta_deg, px, py, tx, ty):
     """
     theta_deg: current heading where 0°=east, +CW (your convention)
@@ -174,15 +173,12 @@ class PseudoGame:
         self._wp_offset = 0
         self._plan_idx = 0
         self.waypoints = self._sample_waypoints()
-        self.draw() # to update screen to reflect object location
+        self.draw() 
 
     def set_augmented(self, _augmented):
         self.augmented = _augmented
 
     def run(self):
-        # self.draw()
-        # obs = self.get_obs()
-        # self.observations.append(obs)
         _temp_for_act = 0
         while not self.done and self.t < self.max_length: 
             self.draw()
@@ -215,7 +211,7 @@ class PseudoGame:
         return self.actions
 
     def get_obs(self):
-        agent_pos = self._get_agent_pos()      # returns world coords (you already do this)
+        agent_pos = self._get_agent_pos()      
         agent_state = self.player.state
 
         raw_dense_point_clouds = self._get_screen_pixels()  # (H,W,3)
@@ -233,8 +229,6 @@ class PseudoGame:
         r_idx, c_idx = np.where(mask)
         coords_img = raw_coords_img[r_idx, c_idx]  # (N,2) [x_img, y_img]
 
-        # If you need world coords instead of image coords:
-        coords_world = np.array([self._img_to_world(r, c) for r, c in zip(r_idx, c_idx)])
 
         return {
             'coords' : coords_img,                 # or coords_img if your model expects image-space
@@ -264,7 +258,7 @@ class PseudoGame:
         dist = np.hypot(dx, dy)
 
         WAYPOINT_THRESHOLD = max(1.0, float(PLAYER_SIZE) * 1)
-        # DEG_THRESHOLD = 5 # deg
+
 
         if dist <= WAYPOINT_THRESHOLD:
             self._plan_idx = idx + 1
@@ -273,15 +267,6 @@ class PseudoGame:
             return
         def wrap180(a):
             return ((a + 180.0) % 360.0) - 180.0
-        # goal_bearing = float(np.degrees(np.arctan2(dy, dx)))
-        # err = goal_bearing - theta_deg
-        # while err > 180.0:  err -= 360.0
-        # while err < -180.0: err += 360.0
-        # Use screen/pygame convention: y increases DOWN.
-        # Convert to a CW-bearing so it matches theta_deg (0=East, +CW).
-        # goal_bearing_ccw = float(np.degrees(np.arctan2(dy, dx)))   # CCW, y-up
-        # goal_bearing_cw  = -goal_bearing_ccw                       # flip sign → CW
-        # err = ((goal_bearing_cw - theta_deg + 180) % 360) - 180    # wrap to [-180,180]
 
         err = signed_heading_error_deg(theta_deg, px, py, target[0], target[1])
         HEADING_DEADBAND = 45.0  # deg
@@ -290,7 +275,7 @@ class PseudoGame:
             # When reversing, treat the vehicle's *rear* as the reference direction.
             # Align the *rear* with the goal by rotating toward err_back,
             # and drive with a negative forward command.
-            err_back = wrap180(err + 180.0)  # error if our rear were the "front"
+            err_back = wrap180(err + 180.0)  # error if rear were the "front"
             align = max(0.0, np.cos(np.radians(err_back)))  # 1 when perfectly aligned
             forward_cmd = float(-min(dist, MAX_FORWARD_DIST) * align)  # NEGATIVE = reverse
             rotation_cmd = float(np.clip(err_back, -MAX_ROTATION, MAX_ROTATION))
@@ -324,11 +309,6 @@ class PseudoGame:
                 self.done = True
 
     def update(self):
-        # dont need to update since syntatical logic not important
-        # player_rect = self.player.get_rect()
-        # object_rect = self.object.get_rect()
-        # if player_rect.colliderect(object_rect) and type(self.object) == EdibleObject and self.player.state is PlayerState.EATING:
-        #     self.object.eaten = True 
         return 
     
     def draw(self, plot = False):
@@ -370,14 +350,11 @@ class PseudoGame:
         _, front, back_left, back_right = [v for _, v in self.player.get_keypoints(frame = 'self').items()]
         center = self.player.get_pos()
         center = np.array(center)
-        # player is a triangle so i want to capture the 3 edges of the triangle
-        # at player_ori == 0 degree, edges == (tl, bl, (tr+br)//2)
         tri_points = np.array([front, back_left, back_right])
         ori_in_deg = self.player.get_orientation(mode='deg')
         R = self._rotation_matrix_2d(ori_in_deg) 
 
         # rotate around center
-
         rotated = (R @ tri_points.T).T
         final = rotated + center
         player_pos = np.vstack([center, final])
@@ -424,7 +401,6 @@ class PseudoGame:
             waypoints = []
 
             # random 
-            # error here i believe for no  biased not augmented keeps adding 0,0,0 into waypoints
             for _ in range(self.num_waypoints_used):
                 obj = random.choice(self.objects)
                 # see if sample on object or around object
@@ -806,7 +782,7 @@ class PseudoGame:
         
     def _augment_waypoints(self, waypoints_with_player_state):
         """
-        Implement data augmentation as described in the paper:
+        Implement data augmentation:
         1. For 30% of trajectories: add local disturbances with corrective actions
         2. For 10% of data points: change gripper open-close state (eating state)
         """
@@ -826,9 +802,7 @@ class PseudoGame:
         """
         original_waypoints = waypoints_with_player_state.copy()
         augmented_waypoints = []
-        
-
-        
+                
         for i in range(len(original_waypoints)):
             current_waypoint = original_waypoints[i].copy()
             
@@ -914,8 +888,3 @@ class PseudoGame:
         y = float(self.screen_height - 1 - row)
         return x, y
 
-
-if __name__ == "__main__":
-    for _ in range(10):
-        pg = PseudoGame(biased=True)
-        pg.run()

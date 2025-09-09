@@ -12,10 +12,6 @@ from .pseudo_configs import SCREEN_WIDTH as  PSEUDO_SCREEN_WIDTH
 
 
 
-# TODO: 
-# deal with demo length i think?
-# also the padding is a problem 
-
 
 class PseudoDemoGenerator:
     agent_keypoints = PseudoGame.agent_keypoints
@@ -57,17 +53,12 @@ class PseudoDemoGenerator:
             curr_obs_batch = []
             context_batch = []
             clean_actions_list = []
-
-            
             for future in as_completed(futures):
                 curr_obs, context, clean_actions = future.result()
                 curr_obs_batch.append(curr_obs)
                 context_batch.append(context)
                 clean_actions_list.append(clean_actions)
 
-        
-        # Stack clean actions into a single tensor [batch_size, pred_horizon, 4]
-        # clean_actions_batch = torch.stack(clean_actions_list, dim=0)
         clean_actions_batch = clean_actions_list
         
         return curr_obs_batch, context_batch, clean_actions_batch
@@ -104,7 +95,6 @@ class PseudoDemoGenerator:
 
     def _run_game(self, pseudo_demo):
         max_retries = 1000
-        # player_starting_pos =(random.randint(0,PSEUDO_SCREEN_WIDTH), random.randint(0,PSEUDO_SCREEN_HEIGHT))
         for attempt in range(max_retries):
             try: 
                 # first reset 
